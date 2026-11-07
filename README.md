@@ -5,7 +5,8 @@ A single, self-hosted dashboard for a homelab: a glassy launchpad with Spotlight
 ## Run it
 
 ```bash
-openssl rand -hex 32   # put this in .env as LABDASH_SECRET=...
+cp .env.example .env
+openssl rand -hex 32   # paste into .env as LABDASH_SECRET=...
 docker compose up -d
 ```
 

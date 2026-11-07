@@ -1,6 +1,6 @@
 services:
   labdash:
-    image: ghcr.io/bentonraymer/labdash:latest
+    image: ghcr.io/bentonraymer/labdash:${LABDASH_TAG:-latest}
     container_name: labdash
     restart: unless-stopped
     # Host networking lets the scanner see MAC addresses (ARP), send ICMP
@@ -9,11 +9,12 @@ services:
     cap_add:
       - NET_RAW
       - NET_ADMIN
+    # Settings come from .env (copy .env.example).
     environment:
       # Encrypts stored API credentials (NPM, Proxmox, Pushover).
       # Generate one with:  openssl rand -hex 32
-      LABDASH_SECRET: ${LABDASH_SECRET:?set LABDASH_SECRET in .env}
-      PORT: 8080
+      LABDASH_SECRET: ${LABDASH_SECRET:?set LABDASH_SECRET in .env (see .env.example)}
+      PORT: ${PORT:-8080}
       TZ: ${TZ:-UTC}
     volumes:
       - ./data:/data
