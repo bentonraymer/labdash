@@ -1,0 +1,19 @@
+services:
+  labdash:
+    image: ghcr.io/bentonraymer/labdash:latest
+    container_name: labdash
+    restart: unless-stopped
+    # Host networking lets the scanner see MAC addresses (ARP), send ICMP
+    # pings and Wake-on-LAN broadcasts. LabDash listens on $PORT (default 8080).
+    network_mode: host
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      # Encrypts stored API credentials (NPM, Proxmox, Pushover).
+      # Generate one with:  openssl rand -hex 32
+      LABDASH_SECRET: ${LABDASH_SECRET:?set LABDASH_SECRET in .env}
+      PORT: 8080
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ./data:/data

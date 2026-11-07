@@ -1,0 +1,209 @@
+// Package api wires the HTTP routes for LabDash.
+package api
+
+import (
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/bentonraymer/labdash/internal/auth"
+	"github.com/bentonraymer/labdash/internal/config"
+	"github.com/bentonraymer/labdash/internal/events"
+	"github.com/bentonraymer/labdash/internal/icons"
+	"github.com/bentonraymer/labdash/internal/secrets"
+)
+
+type Server struct {
+	DB      *sql.DB
+	Cfg     *config.Config
+	Auth    *auth.Service
+	Events  *events.Hub
+	Secrets *secrets.Box
+	Icons   *icons.Cache
+	Web     fs.FS // built frontend (web/dist)
+	Version string
+}
+
+func (s *Server) Router() http.Handler {
+	r := chi.NewRouter()
+	r.Use(middleware.RealIP, middleware.Recoverer, requestLogger, securityHeaders)
+
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
+	r.Handle("/icons/di/*", s.Icons)
+	r.Handle("/media/wallpapers/*", http.StripPrefix("/media/wallpapers/", noDirListing(http.Dir(filepath.Join(s.Cfg.DataDir, "wallpapers")))))
+
+	r.Route("/api", func(r chi.Router) {
+		r.Use(jsonOnly, csrfHeader)
+		r.Get("/setup/status", s.handleSetupStatus)
+		r.Post("/setup", s.handleSetup)
+		r.Post("/auth/login", s.handleLogin)
+		r.Post("/auth/logout", s.handleLogout)
+
+		r.Group(func(r chi.Router) {
+			r.Use(s.Auth.Middleware)
+			r.Get("/auth/me", s.handleMe)
+			r.Post("/auth/password", s.handleChangePassword)
+			r.Get("/events", s.handleEvents)
+
+			r.Get("/settings", s.handleGetSettings)
+			r.Patch("/settings", s.handlePatchSettings)
+			r.Post("/wallpaper", s.handleWallpaperUpload)
+
+			r.Get("/launchpad", s.handleLaunchpad)
+			r.Put("/launchpad/layout", s.handleLayout)
+
+			r.Get("/sections", s.handleListSections)
+			r.Post("/sections", s.handleCreateSection)
+			r.Patch("/sections/{id}", s.handleUpdateSection)
+			r.Delete("/sections/{id}", s.handleDeleteSection)
+
+			r.Get("/services", s.handleListServices)
+			r.Post("/services", s.handleCreateService)
+			r.Get("/services/{id}", s.handleGetService)
+			r.Patch("/services/{id}", s.handleUpdateService)
+			r.Delete("/services/{id}", s.handleDeleteService)
+
+			r.Get("/spotlight/usage", s.handleSpotlightUsage)
+			r.Post("/spotlight/usage", s.handleSpotlightRecord)
+		})
+		r.NotFound(func(w http.ResponseWriter, _ *http.Request) { writeErr(w, http.StatusNotFound, "not found") })
+	})
+
+	r.NotFound(s.spa().ServeHTTP)
+	return r
+}
+
+// spa serves the embedded frontend, falling back to index.html for client routes.
+func (s *Server) spa() http.Handler {
+	fileServer := http.FileServer(http.FS(s.Web))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if p != "" {
+			if st, err := fs.Stat(s.Web, p); err == nil && !st.IsDir() {
+				if strings.HasPrefix(p, "assets/") {
+					w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				}
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+		}
+		idx, err := fs.ReadFile(s.Web, "index.html")
+		if err != nil {
+			http.Error(w, "frontend not built — run `npm run build` in web/", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write(idx)
+	})
+}
+
+// ── middleware ────────────────────────────────────────────────────────────
+
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+		if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/events" {
+			slog.Debug("http", "method", r.Method, "path", r.URL.Path, "status", ww.Status(), "dur", time.Since(start))
+		}
+	})
+}
+
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("X-Frame-Options", "SAMEORIGIN")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func jsonOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		next.ServeHTTP(w, r)
+	})
+}
+
+// csrfHeader requires a custom header on state-changing requests. Browsers
+// cannot send it cross-site without a CORS preflight, which we never allow.
+func csrfHeader(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+		default:
+			if r.Header.Get("X-LabDash") != "1" {
+				writeErr(w, http.StatusForbidden, "missing X-LabDash header")
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+type noDirFS struct{ fs http.FileSystem }
+
+func (n noDirFS) Open(name string) (http.File, error) {
+	f, err := n.fs.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	if st, _ := f.Stat(); st != nil && st.IsDir() {
+		f.Close()
+		return nil, fs.ErrNotExist
+	}
+	return f, nil
+}
+
+func noDirListing(fsys http.FileSystem) http.Handler { return http.FileServer(noDirFS{fsys}) }
+
+// ── helpers ───────────────────────────────────────────────────────────────
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func readJSON(r *http.Request, v any) error {
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20))
+	if err := dec.Decode(v); err != nil {
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	return nil
+}
+
+func idParam(r *http.Request) (int64, error) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, errors.New("invalid id")
+	}
+	return id, nil
+}
+
+func serverErr(w http.ResponseWriter, err error) {
+	slog.Error("handler error", "err", err)
+	writeErr(w, http.StatusInternalServerError, "internal error")
+}
+
+func now() string { return time.Now().UTC().Format("2006-01-02T15:04:05.000Z") }

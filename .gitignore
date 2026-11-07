@@ -1,0 +1,9 @@
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+/data/
+/labdash
+*.db
+*.db-*
+.DS_Store
+.env

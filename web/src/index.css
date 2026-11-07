@@ -1,0 +1,120 @@
+@import "tailwindcss";
+
+/* Design tokens. Two surfaces share one palette:
+   - "glass": the launchpad (frosted tiles over a wallpaper)
+   - "panel": the technical pages (dense, runZero-like) */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-bg: #0a0c11;
+  --color-panel: #10131a;
+  --color-panel-2: #151923;
+  --color-line: #1f2533;
+  --color-line-2: #2a3142;
+  --color-fg: #dfe4ee;
+  --color-muted: #8b94a8;
+  --color-faint: #5d6579;
+  --color-accent: #5b8cff;
+  --color-accent-2: #a78bfa;
+  --color-up: #34d27b;
+  --color-down: #ff4d6d;
+  --color-warn: #f5b843;
+  --color-maint: #60a5fa;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    @apply bg-bg text-fg font-sans antialiased;
+    font-feature-settings: "cv11", "ss01";
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--color-accent) 40%, transparent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-2) transparent;
+  }
+}
+
+/* Inputs used across forms */
+@utility input {
+  @apply w-full rounded-md border border-line-2 bg-bg/60 px-3 py-2 text-sm text-fg placeholder:text-faint
+    outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/25;
+}
+@utility label {
+  @apply mb-1 block text-xs font-medium tracking-wide text-muted uppercase;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition
+    disabled:cursor-not-allowed disabled:opacity-50;
+}
+@utility btn-primary {
+  @apply btn bg-accent text-white hover:brightness-110;
+}
+@utility btn-ghost {
+  @apply btn text-muted hover:bg-white/5 hover:text-fg;
+}
+@utility btn-outline {
+  @apply btn border border-line-2 text-fg hover:bg-white/5;
+}
+@utility btn-danger {
+  @apply btn text-down hover:bg-down/10;
+}
+
+/* Glass surfaces for the launchpad */
+@utility glass {
+  background: linear-gradient(160deg, rgb(28 34 58 / 0.62), rgb(14 17 30 / 0.55));
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid rgb(255 255 255 / 0.07);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.06),
+    0 8px 24px -12px rgb(0 0 0 / 0.6);
+}
+@utility glass-strong {
+  background: rgb(16 19 30 / 0.82);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  border: 1px solid rgb(255 255 255 / 0.09);
+}
+
+@utility kbd {
+  @apply inline-flex h-5 min-w-5 items-center justify-center rounded border border-white/15 bg-white/5 px-1
+    font-mono text-[10px] text-muted;
+}
+
+
+@keyframes pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-down) 70%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+.dot-down {
+  animation: pulse-ring 1.8s infinite;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.pop-in {
+  animation: pop-in 140ms ease-out;
+}
