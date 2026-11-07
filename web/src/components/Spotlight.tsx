@@ -30,9 +30,12 @@ import { useUI } from "./UIProvider";
 
 type Result =
   | { kind: "service"; id: string; title: string; subtitle: string; score: number; indices: number[]; service: Service }
+  | { kind: "link"; id: string; title: string; subtitle: string; score: number; indices: number[]; service: Service; url: string }
   | { kind: "action"; id: string; title: string; subtitle: string; score: number; indices: number[]; icon: LucideIcon; run: () => void };
 
-const groupLabel: Record<Result["kind"], string> = { service: "Services", action: "Actions" };
+const groupLabel: Record<Result["kind"], string> = { service: "Services", link: "Quick links", action: "Actions" };
+
+const ipLike = /^(\d{1,3}\.){3}\d{1,3}(:\d{1,5})?(\/.*)?$/;
 
 export function Spotlight({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [q, setQ] = useState("");
@@ -83,7 +86,8 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
       { id: "go-services", title: "Services table", subtitle: "Go to", icon: Table, run: go("/services"), keywords: "inventory hosting" },
       { id: "go-status", title: "Status", subtitle: "Go to", icon: Activity, run: go("/status"), keywords: "uptime monitors" },
       { id: "go-devices", title: "Network devices", subtitle: "Go to", icon: Network, run: go("/network/devices"), keywords: "scan runzero" },
-      { id: "go-ips", title: "IP addresses", subtitle: "Go to", icon: Server, run: go("/network/ips"), keywords: "ipam static" },
+      { id: "go-ips", title: "IP addresses", subtitle: "Go to", icon: Server, run: go("/network/ips"), keywords: "ipam static subnet" },
+      { id: "go-hosts", title: "Hosts", subtitle: "Go to", icon: Server, run: go("/hosts"), keywords: "proxmox nodes vm lxc" },
       { id: "go-docs", title: "Docs", subtitle: "Go to", icon: FileText, run: go("/docs"), keywords: "notes markdown" },
       { id: "go-topology", title: "Topology", subtitle: "Go to", icon: Share2, run: go("/topology"), keywords: "map graph" },
       { id: "go-settings", title: "Settings", subtitle: "Go to", icon: SettingsIcon, run: go("/settings"), keywords: "config preferences" },
@@ -103,12 +107,41 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
       }
       const m = fuzzyMatch(query, s.name);
       // Secondary fields match at a discount and don't highlight the title.
-      const extra = [s.description, ...s.tags, s.directIp, s.dnsUrl]
+      const ipPort = s.directIp ? `${s.directIp}${s.directPort ? `:${s.directPort}` : ""}` : "";
+      const extra = [s.description, ...s.tags, ipPort, s.dnsUrl.replace(/^https?:\/\//, "")]
         .map((t) => fuzzyMatch(query, t))
         .reduce((best, x) => (x && x.score > best ? x.score : best), -1);
       const score = Math.max(m?.score ?? -1, extra > 0 ? extra * 0.5 : -1);
       if (score < 0) continue;
       out.push({ kind: "service", id: `s${s.id}`, title: s.name, subtitle: s.url, score: score + boost, indices: m?.indices ?? [], service: s });
+    }
+    // Quick links: "Jellyfin › Admin". Match on "service label".
+    if (query) {
+      for (const s of data?.services ?? []) {
+        s.quickLinks.forEach((l, i) => {
+          const title = `${s.name} › ${l.label}`;
+          const m = fuzzyMatch(query, title) ?? fuzzyMatch(query, l.label);
+          if (!m) return;
+          const u = usageMap.get(`link:${s.id}:${i}`);
+          out.push({
+            kind: "link",
+            id: `l${s.id}:${i}`,
+            title,
+            subtitle: l.url,
+            score: m.score * 0.85 + frecencyBoost(u?.count ?? 0, u?.lastUsed),
+            indices: fuzzyMatch(query, title)?.indices ?? [],
+            service: s,
+            url: l.url,
+          });
+        });
+      }
+    }
+    // Typing a raw IP or IP:port offers to open it directly.
+    if (ipLike.test(query)) {
+      const url = `http://${query}`;
+      out.push({ kind: "action", id: "open-ip", title: `Open ${url}`, subtitle: "Direct address", icon: Globe, run: () => window.open(url, "_blank", "noopener"), score: 450, indices: [] });
+      const bare = query.split(/[:/]/)[0];
+      out.push({ kind: "action", id: "ip-view", title: `Port view for ${bare}`, subtitle: "Who uses this IP and which ports", icon: Network, run: () => navigate(`/network/ips/${bare}`), score: 440, indices: [] });
     }
     for (const a of actions) {
       const u = usageMap.get(`action:${a.id}`);
@@ -121,7 +154,11 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
       out.push({ kind: "action", id: a.id, title: a.title, subtitle: a.subtitle, icon: a.icon, run: a.run, score: score * 0.9 + boost, indices: m?.indices ?? [] });
     }
     out.sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
-    return out.slice(0, query ? 12 : 8);
+    // Keep groups contiguous (ordered by each group's best hit) so headers read cleanly.
+    const top = out.slice(0, query ? 14 : 8);
+    const groupRank = new Map<string, number>();
+    top.forEach((r, i) => !groupRank.has(r.kind) && groupRank.set(r.kind, i));
+    return top.sort((a, b) => groupRank.get(a.kind)! - groupRank.get(b.kind)! || b.score - a.score);
   }, [q, data?.services, actions, usageMap]);
 
   useEffect(() => setSel(0), [q]);
@@ -136,7 +173,10 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
   const activate = (r: Result | undefined, opts: { newTab?: boolean } = {}) => {
     if (!r) return;
     onClose();
-    if (r.kind === "service") {
+    if (r.kind === "link") {
+      record("link", r.id.slice(1));
+      window.open(r.url, "_blank", "noopener");
+    } else if (r.kind === "service") {
       record("service", String(r.service.id));
       if (!r.service.url) return ui.editService(r.service);
       const newTab = opts.newTab ?? r.service.newTab;
@@ -215,7 +255,7 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
                       i === sel ? "bg-accent/90 text-white" : "text-fg hover:bg-white/5",
                     )}
                   >
-                    {r.kind === "service" ? (
+                    {r.kind === "service" || r.kind === "link" ? (
                       <ServiceIcon icon={r.service.icon} name={r.service.name} className="size-8 shrink-0" />
                     ) : (
                       <span className={clsx("flex size-8 shrink-0 items-center justify-center rounded-lg", i === sel ? "bg-white/20" : "bg-white/5")}>

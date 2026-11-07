@@ -7,6 +7,10 @@ import { LoginPage, SetupPage } from "@/pages/Auth";
 import { AdminLayout, ComingSoon } from "@/pages/admin/AdminLayout";
 import { ServicesPage } from "@/pages/admin/ServicesPage";
 import { SettingsPage } from "@/pages/admin/SettingsPage";
+import { StatusPage } from "@/pages/admin/status/StatusPage";
+import { HostsPage } from "@/pages/admin/hosts/HostsPage";
+import { IPAddressesPage } from "@/pages/admin/network/IPAddressesPage";
+import { IPDetailPage } from "@/pages/admin/network/IPDetailPage";
 
 function AuthGate() {
   const setup = useSetupStatus();
@@ -33,27 +37,15 @@ const router = createBrowserRouter([
         element: <AdminLayout />,
         children: [
           { path: "/services", element: <ServicesPage /> },
-          {
-            path: "/status",
-            element: (
-              <ComingSoon title="Status" phase={3}>
-                Uptime monitors (HTTP, TCP, ping, DNS), 24h / 7d / 30d uptime bars, incidents, maintenance windows and Pushover alerts with per-service mute.
-              </ComingSoon>
-            ),
-          },
+          { path: "/status", element: <StatusPage /> },
+          { path: "/hosts", element: <HostsPage /> },
+          { path: "/network/ips", element: <IPAddressesPage /> },
+          { path: "/network/ips/:ip", element: <IPDetailPage /> },
           {
             path: "/network/devices",
             element: (
               <ComingSoon title="Network devices" phase={5}>
                 Scheduled nmap scans of your subnets with MAC vendor, OS detection, favicons for web ports, and Pushover alerts for new devices.
-              </ComingSoon>
-            ),
-          },
-          {
-            path: "/network/ips",
-            element: (
-              <ComingSoon title="IP addresses" phase={4}>
-                A per-subnet IP grid showing static, reserved, DHCP and free addresses, a "next free static IP" helper, and a port view for each IP.
               </ComingSoon>
             ),
           },

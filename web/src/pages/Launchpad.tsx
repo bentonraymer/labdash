@@ -426,7 +426,7 @@ function SortableTile({ service, size, editing, glow }: { service: Service; size
         e.preventDefault();
         ui.editService(service);
       }}
-      title={[service.description, service.url || "No URL — click to configure", `Status: ${statusLabel(service.status)}`].filter(Boolean).join("\n")}
+      title={[service.description, service.url || "No URL — click to configure", `Status: ${statusLabel(service.status)}${service.latencyMs != null ? ` · ${service.latencyMs} ms` : ""}`].filter(Boolean).join("\n")}
       className="block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <TileFace service={service} size={size} glow={glow} />

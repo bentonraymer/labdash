@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Activity, FileText, LayoutGrid, LogOut, Network, Search, Server, Settings, Share2, Table, type LucideIcon } from "lucide-react";
+import { Activity, Cpu, FileText, LayoutGrid, LogOut, Network, Search, Server, Settings, Share2, Table, type LucideIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { useLaunchpad, useMe } from "@/lib/queries";
 import { ModeToggle } from "@/components/ModeToggle";
@@ -11,6 +11,7 @@ import { useUI } from "@/components/UIProvider";
 const nav: { to: string; label: string; icon: LucideIcon; group?: string }[] = [
   { to: "/", label: "Launchpad", icon: LayoutGrid },
   { to: "/services", label: "Services", icon: Table, group: "Inventory" },
+  { to: "/hosts", label: "Hosts", icon: Cpu, group: "Inventory" },
   { to: "/status", label: "Status", icon: Activity, group: "Inventory" },
   { to: "/topology", label: "Topology", icon: Share2, group: "Inventory" },
   { to: "/network/devices", label: "Devices", icon: Network, group: "Network" },

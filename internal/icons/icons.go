@@ -23,6 +23,7 @@ type Cache struct {
 	dir    string
 	client *http.Client
 	mu     sync.Mutex
+	idxMu  sync.Mutex
 	inFlt  map[string]*sync.Mutex
 }
 

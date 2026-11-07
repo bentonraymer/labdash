@@ -22,18 +22,24 @@ import (
 	"github.com/bentonraymer/labdash/internal/config"
 	"github.com/bentonraymer/labdash/internal/events"
 	"github.com/bentonraymer/labdash/internal/icons"
+	"github.com/bentonraymer/labdash/internal/integrations"
+	"github.com/bentonraymer/labdash/internal/monitor"
+	"github.com/bentonraymer/labdash/internal/pushover"
 	"github.com/bentonraymer/labdash/internal/secrets"
 )
 
 type Server struct {
-	DB      *sql.DB
-	Cfg     *config.Config
-	Auth    *auth.Service
-	Events  *events.Hub
-	Secrets *secrets.Box
-	Icons   *icons.Cache
-	Web     fs.FS // built frontend (web/dist)
-	Version string
+	DB           *sql.DB
+	Cfg          *config.Config
+	Auth         *auth.Service
+	Events       *events.Hub
+	Secrets      *secrets.Box
+	Icons        *icons.Cache
+	Monitor      *monitor.Engine
+	Integrations *integrations.Store
+	Pushover     *pushover.Client
+	Web          fs.FS // built frontend (web/dist)
+	Version      string
 }
 
 func (s *Server) Router() http.Handler {
@@ -42,6 +48,7 @@ func (s *Server) Router() http.Handler {
 
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok")) })
 	r.Handle("/icons/di/*", s.Icons)
+	r.Get("/icons/custom/*", s.Icons.ServeCustom)
 	r.Handle("/media/wallpapers/*", http.StripPrefix("/media/wallpapers/", noDirListing(http.Dir(filepath.Join(s.Cfg.DataDir, "wallpapers")))))
 
 	r.Route("/api", func(r chi.Router) {
@@ -74,6 +81,50 @@ func (s *Server) Router() http.Handler {
 			r.Get("/services/{id}", s.handleGetService)
 			r.Patch("/services/{id}", s.handleUpdateService)
 			r.Delete("/services/{id}", s.handleDeleteService)
+
+			r.Get("/icons/index", s.handleIconIndex)
+			r.Post("/icons/upload", s.handleIconUpload)
+			r.Post("/icons/favicon", s.handleIconFavicon)
+
+			r.Post("/import/dashy", s.handleImportDashy)
+
+			r.Post("/services/wizard", s.handleServiceWizard)
+			r.Put("/services/{id}/deployment", s.handlePutDeployment)
+
+			r.Get("/hosts", s.handleListHosts)
+			r.Post("/hosts", s.handleCreateHost)
+			r.Patch("/hosts/{id}", s.handleUpdateHost)
+			r.Delete("/hosts/{id}", s.handleDeleteHost)
+
+			r.Get("/subnets", s.handleListSubnets)
+			r.Post("/subnets", s.handleSaveSubnet)
+			r.Put("/subnets/{id}", s.handleSaveSubnet)
+			r.Delete("/subnets/{id}", s.handleDeleteSubnet)
+			r.Get("/subnets/{id}/map", s.handleSubnetMap)
+			r.Get("/ips/check", s.handleIPCheck)
+			r.Get("/ips/{ip}", s.handleIPDetail)
+			r.Get("/ips/{ip}/free-port", s.handleFreePort)
+			r.Put("/ip-assignments", s.handleSaveAssignment)
+			r.Delete("/ip-assignments/{ip}", s.handleDeleteAssignment)
+			r.Post("/port-claims", s.handleCreatePortClaim)
+			r.Delete("/port-claims/{id}", s.handleDeletePortClaim)
+
+			r.Get("/monitors", s.handleListMonitors)
+			r.Post("/monitors", s.handleCreateMonitor)
+			r.Patch("/monitors/{id}", s.handleUpdateMonitor)
+			r.Delete("/monitors/{id}", s.handleDeleteMonitor)
+			r.Post("/monitors/{id}/check", s.handleCheckMonitor)
+			r.Get("/monitors/{id}/history", s.handleMonitorHistory)
+			r.Get("/incidents", s.handleListIncidents)
+
+			r.Get("/maintenance", s.handleListMaintenance)
+			r.Post("/maintenance", s.handleSaveMaintenance)
+			r.Put("/maintenance/{id}", s.handleSaveMaintenance)
+			r.Delete("/maintenance/{id}", s.handleDeleteMaintenance)
+
+			r.Get("/integrations/pushover", s.handleGetPushover)
+			r.Put("/integrations/pushover", s.handlePutPushover)
+			r.Post("/integrations/pushover/test", s.handleTestPushover)
 
 			r.Get("/spotlight/usage", s.handleSpotlightUsage)
 			r.Post("/spotlight/usage", s.handleSpotlightRecord)

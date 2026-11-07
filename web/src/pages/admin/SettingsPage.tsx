@@ -5,6 +5,8 @@ import { api, ApiError } from "@/lib/api";
 import { keys, useLaunchpad, usePatchSettings } from "@/lib/queries";
 import { ModeToggle } from "@/components/ModeToggle";
 import { PageHeader } from "./AdminLayout";
+import { DashyImport } from "./DashyImport";
+import { PushoverCard } from "./PushoverCard";
 
 function Card({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
@@ -116,6 +118,14 @@ export function SettingsPage() {
           <Row label="Glow on down services">
             <Toggle checked={s.tile_glow} onChange={(v) => patch.mutate({ tile_glow: v })} />
           </Row>
+        </Card>
+
+        <Card title="Pushover notifications" description="Where down/up alerts are sent">
+          <PushoverCard />
+        </Card>
+
+        <Card title="Import from Dashy" description="Bring over your existing sections and tiles from a Dashy conf.yml">
+          <DashyImport />
         </Card>
 
         <PasswordCard />

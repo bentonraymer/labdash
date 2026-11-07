@@ -117,6 +117,9 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		serverErr(w, err)
 		return
 	}
+	if _, ok := patch["access_mode"]; ok {
+		s.reloadMonitors() // derived targets follow the access mode
+	}
 	s.Events.Publish("settings", st)
 	writeJSON(w, http.StatusOK, st)
 }

@@ -1,48 +1,108 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ExternalLink, Plus } from "lucide-react";
+import { Link } from "react-router";
 import clsx from "clsx";
+import { ArrowDown, ArrowUp, Download, ExternalLink, Plus } from "lucide-react";
 import { useLaunchpad } from "@/lib/queries";
-import type { Service } from "@/lib/types";
+import { runtimeLabel, runtimeTone } from "@/lib/labels";
+import type { Runtime, Service } from "@/lib/types";
 import { ServiceIcon } from "@/components/ServiceIcon";
 import { StatusDot, statusLabel } from "@/components/StatusDot";
 import { useUI } from "@/components/UIProvider";
 import { PageHeader } from "./AdminLayout";
 
-type SortKey = "name" | "section" | "status" | "dnsUrl" | "directIp" | "directPort";
+type SortKey = "name" | "section" | "status" | "node" | "host" | "runtime" | "ref" | "ip" | "port" | "dns";
+
+const ipKey = (ip: string) => ip.split(".").map((p) => p.padStart(3, "0")).join(".");
 
 export function ServicesPage() {
   const { data } = useLaunchpad();
   const ui = useUI();
   const [filter, setFilter] = useState("");
+  const [runtime, setRuntime] = useState<Runtime | "all" | "none">("all");
+  const [node, setNode] = useState("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
 
   const sectionName = useMemo(() => new Map(data?.sections.map((s) => [s.id, s.name]) ?? []), [data?.sections]);
+  const services = data?.services ?? [];
+  const nodes = useMemo(() => [...new Set(services.map((s) => s.hosting?.nodeName).filter(Boolean) as string[])].sort(), [services]);
+
+  const val = (s: Service, k: SortKey): string | number => {
+    switch (k) {
+      case "section":
+        return sectionName.get(s.sectionId ?? -1) ?? "~";
+      case "status":
+        return s.status;
+      case "node":
+        return s.hosting?.nodeName || "~";
+      case "host":
+        return s.hosting?.hostName || "~";
+      case "runtime":
+        return s.hosting?.runtime ?? "~";
+      case "ref":
+        return s.hosting?.vmid ?? (s.hosting?.containerName || "~");
+      case "ip":
+        return s.directIp ? ipKey(s.directIp) : "~";
+      case "port":
+        return s.directPort ?? 99999;
+      case "dns":
+        return s.dnsUrl || "~";
+      default:
+        return s.name.toLowerCase();
+    }
+  };
 
   const rows = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    const val = (s: Service): string | number => {
-      switch (sort.key) {
-        case "section":
-          return sectionName.get(s.sectionId ?? -1) ?? "";
-        case "directPort":
-          return s.directPort ?? 0;
-        case "directIp":
-          return s.directIp.split(".").map((p) => p.padStart(3, "0")).join(".");
-        default:
-          return String(s[sort.key]).toLowerCase();
-      }
-    };
-    return (data?.services ?? [])
-      .filter((s) => !q || [s.name, s.dnsUrl, s.directIp, String(s.directPort ?? ""), s.description, ...s.tags].some((v) => v.toLowerCase().includes(q)))
+    return services
+      .filter((s) => runtime === "all" || (runtime === "none" ? !s.hosting : s.hosting?.runtime === runtime))
+      .filter((s) => node === "all" || s.hosting?.nodeName === node)
+      .filter(
+        (s) =>
+          !q ||
+          [s.name, s.dnsUrl, s.directIp, String(s.directPort ?? ""), s.description, s.hosting?.hostName ?? "", s.hosting?.containerName ?? "", String(s.hosting?.vmid ?? ""), ...s.tags].some(
+            (v) => v.toLowerCase().includes(q),
+          ),
+      )
       .sort((a, b) => {
-        const va = val(a);
-        const vb = val(b);
-        return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir;
+        const va = val(a, sort.key);
+        const vb = val(b, sort.key);
+        return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir || a.name.localeCompare(b.name);
       });
-  }, [data?.services, filter, sort, sectionName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [services, filter, runtime, node, sort, sectionName]);
+
+  const exportCSV = () => {
+    const head = ["Name", "Section", "Status", "Node", "Host", "Type", "VMID", "Container", "IP", "Port", "DNS URL", "Direct URL", "Tags"];
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const lines = rows.map((s) =>
+      [
+        s.name,
+        sectionName.get(s.sectionId ?? -1) ?? "",
+        s.status,
+        s.hosting?.nodeName,
+        s.hosting?.hostName,
+        s.hosting ? runtimeLabel[s.hosting.runtime] : "",
+        s.hosting?.vmid,
+        s.hosting?.containerName,
+        s.directIp,
+        s.directPort,
+        s.dnsUrl,
+        s.directUrl,
+        s.tags.join(" "),
+      ]
+        .map(esc)
+        .join(","),
+    );
+    const blob = new Blob([[head.join(","), ...lines].join("\n")], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `labdash-services-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 
   const Th = ({ k, children, className }: { k: SortKey; children: ReactNode; className?: string }) => (
-    <th className={clsx("px-3 py-2 text-left font-medium", className)}>
+    <th className={clsx("px-3 py-2 text-left font-medium whitespace-nowrap", className)}>
       <button className="inline-flex items-center gap-1 hover:text-fg" onClick={() => setSort((s) => ({ key: k, dir: s.key === k ? (-s.dir as 1 | -1) : 1 }))}>
         {children}
         {sort.key === k && (sort.dir === 1 ? <ArrowUp size={11} /> : <ArrowDown size={11} />)}
@@ -50,20 +110,48 @@ export function ServicesPage() {
     </th>
   );
 
+  const runtimes: (Runtime | "all" | "none")[] = ["all", "docker", "lxc", "vm", "bare_metal", "other", "none"];
+
   return (
     <>
       <PageHeader
         title="Services"
-        subtitle={`${data?.services.length ?? 0} services · hosting details (node, VM/LXC/Docker) arrive in build phase 4`}
+        subtitle={`${rows.length} of ${services.length} services`}
         actions={
           <>
-            <input className="input w-64 py-1.5" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <button className="btn-ghost py-1.5" onClick={exportCSV} title="Download the filtered table as CSV">
+              <Download size={15} /> CSV
+            </button>
             <button className="btn-primary py-1.5" onClick={() => ui.editService(null)}>
               <Plus size={15} /> Add service
             </button>
           </>
         }
       />
+      <div className="flex flex-wrap items-center gap-2 border-b border-line px-6 py-3">
+        <input className="input w-64 py-1.5" placeholder="Filter by name, IP, host, tag…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <div className="flex rounded-md border border-line-2 p-0.5">
+          {runtimes.map((r) => (
+            <button
+              key={r}
+              onClick={() => setRuntime(r)}
+              className={clsx("rounded px-2.5 py-1 text-xs", runtime === r ? "bg-accent/20 text-fg" : "text-muted hover:text-fg")}
+            >
+              {r === "all" ? "All" : r === "none" ? "Unassigned" : runtimeLabel[r]}
+            </button>
+          ))}
+        </div>
+        {nodes.length > 0 && (
+          <select className="input w-auto py-1.5 text-xs" value={node} onChange={(e) => setNode(e.target.value)}>
+            <option value="all">All nodes</option>
+            {nodes.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
       <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead className="sticky top-0 z-10 border-b border-line bg-panel text-xs text-muted">
@@ -72,11 +160,14 @@ export function ServicesPage() {
                 Up
               </Th>
               <Th k="name">Name</Th>
+              <Th k="node">Node</Th>
+              <Th k="host">Host</Th>
+              <Th k="runtime">Type</Th>
+              <Th k="ref">VMID / container</Th>
+              <Th k="ip">IP</Th>
+              <Th k="port">Port</Th>
+              <Th k="dns">DNS URL</Th>
               <Th k="section">Section</Th>
-              <Th k="dnsUrl">DNS URL</Th>
-              <Th k="directIp">IP</Th>
-              <Th k="directPort">Port</Th>
-              <th className="px-3 py-2 text-left font-medium">Tags</th>
               <th className="w-10" />
             </tr>
           </thead>
@@ -89,22 +180,31 @@ export function ServicesPage() {
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-2.5">
                     <ServiceIcon icon={s.icon} name={s.name} className="size-5" />
-                    <span className="font-medium">{s.name}</span>
+                    <span className="font-medium whitespace-nowrap">{s.name}</span>
                   </div>
                 </td>
-                <td className="px-3 py-2 text-muted">{sectionName.get(s.sectionId ?? -1) ?? "—"}</td>
-                <td className="px-3 py-2 font-mono text-xs text-muted">{s.dnsUrl || "—"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{s.directIp || "—"}</td>
-                <td className="px-3 py-2 font-mono text-xs">{s.directPort ?? "—"}</td>
+                <td className="px-3 py-2 whitespace-nowrap text-muted">{s.hosting?.nodeName || "—"}</td>
+                <td className="px-3 py-2 whitespace-nowrap">{s.hosting?.hostName && s.hosting.hostName !== s.hosting.nodeName ? s.hosting.hostName : <span className="text-faint">—</span>}</td>
                 <td className="px-3 py-2">
-                  <div className="flex flex-wrap gap-1">
-                    {s.tags.map((t) => (
-                      <span key={t} className="rounded bg-white/5 px-1.5 py-0.5 text-[11px] text-muted">
-                        {t}
-                      </span>
-                    ))}
-                  </div>
+                  {s.hosting ? (
+                    <span className={clsx("rounded px-1.5 py-0.5 text-[11px] font-medium", runtimeTone[s.hosting.runtime])}>{runtimeLabel[s.hosting.runtime]}</span>
+                  ) : (
+                    <span className="text-faint">—</span>
+                  )}
                 </td>
+                <td className="px-3 py-2 font-mono text-xs text-muted">{s.hosting?.vmid ?? (s.hosting?.containerName || "—")}</td>
+                <td className="px-3 py-2 font-mono text-xs" onClick={(e) => e.stopPropagation()}>
+                  {s.directIp ? (
+                    <Link to={`/network/ips/${s.directIp}`} className="hover:text-accent">
+                      {s.directIp}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="px-3 py-2 font-mono text-xs">{s.directPort ?? "—"}</td>
+                <td className="max-w-[260px] truncate px-3 py-2 font-mono text-xs text-muted">{s.dnsUrl || "—"}</td>
+                <td className="px-3 py-2 whitespace-nowrap text-muted">{sectionName.get(s.sectionId ?? -1) ?? "—"}</td>
                 <td className="px-3 py-2">
                   {s.url && (
                     <a href={s.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-faint hover:text-accent" title={s.url}>
@@ -116,8 +216,8 @@ export function ServicesPage() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-3 py-10 text-center text-muted">
-                  No services yet.
+                <td colSpan={11} className="px-3 py-10 text-center text-muted">
+                  No services match.
                 </td>
               </tr>
             )}

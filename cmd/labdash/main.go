@@ -11,12 +11,16 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/bentonraymer/labdash/internal/alerts"
 	"github.com/bentonraymer/labdash/internal/api"
 	"github.com/bentonraymer/labdash/internal/auth"
 	"github.com/bentonraymer/labdash/internal/config"
 	"github.com/bentonraymer/labdash/internal/db"
 	"github.com/bentonraymer/labdash/internal/events"
 	"github.com/bentonraymer/labdash/internal/icons"
+	"github.com/bentonraymer/labdash/internal/integrations"
+	"github.com/bentonraymer/labdash/internal/monitor"
+	"github.com/bentonraymer/labdash/internal/pushover"
 	"github.com/bentonraymer/labdash/internal/secrets"
 	"github.com/bentonraymer/labdash/web"
 )
@@ -58,21 +62,30 @@ func run() error {
 	}
 
 	authSvc := auth.New(database)
+	hub := events.NewHub()
+	store := &integrations.Store{DB: database, Box: box}
+	po := pushover.New()
+	engine := monitor.NewEngine(database, hub, &alerts.Pushover{Store: store, Client: po})
 	srv := &api.Server{
-		DB:      database,
-		Cfg:     cfg,
-		Auth:    authSvc,
-		Events:  events.NewHub(),
-		Secrets: box,
-		Icons:   icons.New(cfg.DataDir + "/icons"),
-		Web:     dist,
-		Version: version,
+		DB:           database,
+		Cfg:          cfg,
+		Auth:         authSvc,
+		Events:       hub,
+		Monitor:      engine,
+		Integrations: store,
+		Pushover:     po,
+		Secrets:      box,
+		Icons:        icons.New(cfg.DataDir + "/icons"),
+		Web:          dist,
+		Version:      version,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Background housekeeping. Monitor/scan workers are added in later phases.
+	go engine.Run(ctx)
+
+	// Background housekeeping.
 	go func() {
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()

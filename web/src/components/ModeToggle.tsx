@@ -13,7 +13,7 @@ export function ModeToggle({ variant = "glass" }: { variant?: "glass" | "panel" 
       role="radiogroup"
       aria-label="Access mode"
       title="How service links are opened: DNS names or direct IP:port"
-      className={clsx("relative flex items-center rounded-full p-0.5 text-xs font-semibold", variant === "glass" ? "glass" : "border border-line-2 bg-panel-2")}
+      className={clsx("relative inline-flex items-center rounded-full p-0.5 text-xs font-semibold", variant === "glass" ? "glass" : "border border-line-2 bg-panel-2")}
     >
       <span
         aria-hidden
