@@ -43,6 +43,8 @@ type Service struct {
 	URL          string      `json:"url"`       // resolved for current access mode
 	DirectURL    string      `json:"directUrl"` // always the IP form
 	Status       string      `json:"status"`    // from monitor; 'unknown' if none
+	LatencyMs    *int        `json:"latencyMs"`
+	Hosting      *Hosting    `json:"hosting"` // last check latency of the service's monitor
 }
 
 const serviceCols = `id, section_id, name, icon, description, position, dns_url, direct_scheme,
@@ -98,36 +100,54 @@ func (s *Server) listServices(ctx context.Context) ([]*Service, error) {
 		return nil, err
 	}
 	rows.Close() // release the connection before the next query
+	if hostings, err := s.loadHostings(ctx); err == nil {
+		for _, sv := range out {
+			sv.Hosting = hostings[sv.ID]
+		}
+	}
 	// Overlay monitor status (worst status of a service's monitors).
 	st, err := s.serviceStatuses(ctx)
 	if err == nil {
 		for _, sv := range out {
 			if v, ok := st[sv.ID]; ok {
-				sv.Status = v
+				sv.Status = v.status
+				sv.LatencyMs = v.latency
 			}
 		}
 	}
 	return out, nil
 }
 
-func (s *Server) serviceStatuses(ctx context.Context) (map[int64]string, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT service_id, status FROM monitors WHERE service_id IS NOT NULL AND enabled = 1`)
+type svcStatus struct {
+	status  string
+	latency *int
+}
+
+func (s *Server) serviceStatuses(ctx context.Context) (map[int64]svcStatus, error) {
+	rows, err := s.DB.QueryContext(ctx, `SELECT service_id, status, last_latency_ms FROM monitors WHERE service_id IS NOT NULL AND enabled = 1`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	rank := map[string]int{"down": 4, "pending": 1, "maintenance": 2, "paused": 0, "up": 3}
-	out := map[int64]string{}
+	// Worst status wins: down > up > maintenance > pending.
+	rank := map[string]int{"down": 4, "up": 3, "maintenance": 2, "pending": 1}
+	out := map[int64]svcStatus{}
 	for rows.Next() {
 		var id int64
 		var st string
-		if err := rows.Scan(&id, &st); err != nil {
+		var lat sql.NullInt64
+		if err := rows.Scan(&id, &st, &lat); err != nil {
 			return nil, err
 		}
-		// down beats everything; up beats pending/maintenance.
-		if cur, ok := out[id]; !ok || rank[st] > rank[cur] {
-			out[id] = st
+		cur, ok := out[id]
+		if !ok || rank[st] > rank[cur.status] {
+			cur.status = st
 		}
+		if lat.Valid && st == "up" {
+			v := int(lat.Int64)
+			cur.latency = &v
+		}
+		out[id] = cur
 	}
 	return out, rows.Err()
 }
@@ -353,7 +373,19 @@ func (s *Server) handleListServices(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getService(ctx context.Context, id int64) (*Service, error) {
 	mode := s.accessMode(ctx) // before QueryRow: the row holds the connection until Scan
 	row := s.DB.QueryRowContext(ctx, `SELECT `+serviceCols+` FROM services WHERE id = ?`, id)
-	return scanService(row, mode)
+	sv, err := scanService(row, mode)
+	if err != nil {
+		return nil, err
+	}
+	if hostings, err := s.loadHostings(ctx); err == nil {
+		sv.Hosting = hostings[sv.ID]
+	}
+	if st, err := s.serviceStatuses(ctx); err == nil {
+		if v, ok := st[sv.ID]; ok {
+			sv.Status, sv.LatencyMs = v.status, v.latency
+		}
+	}
+	return sv, nil
 }
 
 func (s *Server) handleGetService(w http.ResponseWriter, r *http.Request) {
@@ -407,6 +439,7 @@ func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 		serverErr(w, err)
 		return
 	}
+	s.reloadMonitors()
 	s.Events.Publish("launchpad", nil)
 	writeJSON(w, http.StatusCreated, sv)
 }
@@ -467,6 +500,7 @@ func (s *Server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		serverErr(w, err)
 		return
 	}
+	s.reloadMonitors()
 	s.Events.Publish("launchpad", nil)
 	writeJSON(w, http.StatusOK, sv)
 }
@@ -481,6 +515,7 @@ func (s *Server) handleDeleteService(w http.ResponseWriter, r *http.Request) {
 		serverErr(w, err)
 		return
 	}
+	s.reloadMonitors()
 	s.Events.Publish("launchpad", nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

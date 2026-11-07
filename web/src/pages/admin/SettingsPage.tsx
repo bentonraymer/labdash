@@ -5,6 +5,10 @@ import { api, ApiError } from "@/lib/api";
 import { keys, useLaunchpad, usePatchSettings } from "@/lib/queries";
 import { ModeToggle } from "@/components/ModeToggle";
 import { PageHeader } from "./AdminLayout";
+import { DashyImport } from "./DashyImport";
+import { PushoverCard } from "./PushoverCard";
+import { NPMCard, ProxmoxCard } from "./IntegrationCards";
+import { BackupCard } from "./BackupCard";
 
 function Card({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
@@ -83,6 +87,9 @@ export function SettingsPage() {
           <Row label="Access mode" hint="DNS names or direct IP:port for every link">
             <ModeToggle variant="panel" />
           </Row>
+          <Row label="New-device alerts" hint="Pushover when a scan finds an unknown device">
+            <Toggle checked={s.new_device_alerts} onChange={(v) => patch.mutate({ new_device_alerts: v })} />
+          </Row>
           <Row label="Pause all alerts" hint="Silences Pushover notifications">
             <Toggle checked={s.alerts_paused} onChange={(v) => patch.mutate({ alerts_paused: v })} />
           </Row>
@@ -116,6 +123,26 @@ export function SettingsPage() {
           <Row label="Glow on down services">
             <Toggle checked={s.tile_glow} onChange={(v) => patch.mutate({ tile_glow: v })} />
           </Row>
+        </Card>
+
+        <Card title="Pushover notifications" description="Where down/up alerts are sent">
+          <PushoverCard />
+        </Card>
+
+        <Card title="Nginx Proxy Manager" description="Check and create proxy hosts for your services' DNS names">
+          <NPMCard />
+        </Card>
+
+        <Card title="Proxmox" description="Live CPU / RAM / disk for nodes and linked VMs & LXCs">
+          <ProxmoxCard />
+        </Card>
+
+        <Card title="Backup & restore">
+          <BackupCard />
+        </Card>
+
+        <Card title="Import from Dashy" description="Bring over your existing sections and tiles from a Dashy conf.yml">
+          <DashyImport />
         </Card>
 
         <PasswordCard />

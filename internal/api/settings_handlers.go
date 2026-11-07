@@ -20,15 +20,18 @@ type settingSpec struct {
 }
 
 var settingSpecs = map[string]settingSpec{
-	"site_title":     {"LabDash", isString(1, 60)},
-	"access_mode":    {"dns", oneOf("dns", "direct")},
-	"dns_domain":     {"", isString(0, 253)},
-	"wallpaper":      {"", isString(0, 500)},
-	"wallpaper_blur": {float64(0), isNumber(0, 40)},
-	"wallpaper_dim":  {float64(35), isNumber(0, 95)},
-	"alerts_paused":  {false, isBool},
-	"tile_glow":      {true, isBool},
-	"open_new_tab":   {true, isBool},
+	"site_title":        {"LabDash", isString(1, 60)},
+	"access_mode":       {"dns", oneOf("dns", "direct")},
+	"dns_domain":        {"", isString(0, 253)},
+	"wallpaper":         {"", isString(0, 500)},
+	"wallpaper_blur":    {float64(0), isNumber(0, 40)},
+	"wallpaper_dim":     {float64(35), isNumber(0, 95)},
+	"alerts_paused":     {false, isBool},
+	"new_device_alerts": {true, isBool},
+	"backup_auto":       {true, isBool},
+	"backup_keep":       {float64(7), isNumber(1, 90)},
+	"tile_glow":         {true, isBool},
+	"open_new_tab":      {true, isBool},
 }
 
 func (s *Server) loadSettings(ctx context.Context) (map[string]any, error) {
@@ -116,6 +119,9 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		serverErr(w, err)
 		return
+	}
+	if _, ok := patch["access_mode"]; ok {
+		s.reloadMonitors() // derived targets follow the access mode
 	}
 	s.Events.Publish("settings", st)
 	writeJSON(w, http.StatusOK, st)

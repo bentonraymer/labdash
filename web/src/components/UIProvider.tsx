@@ -3,6 +3,7 @@ import type { Section, Service } from "@/lib/types";
 import { ServiceEditor } from "./ServiceEditor";
 import { SectionEditor } from "./SectionEditor";
 import { Spotlight } from "./Spotlight";
+import { ServiceWizard } from "./ServiceWizard";
 
 interface UI {
   openSpotlight: () => void;
@@ -22,10 +23,15 @@ export function useUI(): UI {
 export function UIProvider({ children }: { children: ReactNode }) {
   const [spotlight, setSpotlight] = useState(false);
   const [svc, setSvc] = useState<{ open: boolean; service: Service | null; sectionId?: number | null }>({ open: false, service: null });
+  const [wiz, setWiz] = useState<{ open: boolean; sectionId?: number | null }>({ open: false });
   const [sec, setSec] = useState<{ open: boolean; section: Section | null }>({ open: false, section: null });
 
   const openSpotlight = useCallback(() => setSpotlight(true), []);
-  const editService = useCallback((service: Service | null, sectionId?: number | null) => setSvc({ open: true, service, sectionId }), []);
+  // New services go through the wizard; existing ones open the editor.
+  const editService = useCallback(
+    (service: Service | null, sectionId?: number | null) => (service ? setSvc({ open: true, service, sectionId }) : setWiz({ open: true, sectionId })),
+    [],
+  );
   const editSection = useCallback((section: Section | null) => setSec({ open: true, section }), []);
 
   useEffect(() => {
@@ -51,6 +57,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
       {children}
       <Spotlight open={spotlight} onClose={() => setSpotlight(false)} />
       <ServiceEditor open={svc.open} service={svc.service} defaultSectionId={svc.sectionId} onClose={() => setSvc((p) => ({ ...p, open: false }))} />
+      <ServiceWizard open={wiz.open} sectionId={wiz.sectionId} onClose={() => setWiz({ open: false })} />
       <SectionEditor open={sec.open} section={sec.section} onClose={() => setSec((p) => ({ ...p, open: false }))} />
     </Ctx.Provider>
   );

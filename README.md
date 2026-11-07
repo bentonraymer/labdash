@@ -20,6 +20,20 @@ Then open `http://<host>:8080` and create the admin account.
 | `LABDASH_DATA_DIR` | `/data` | Data directory |
 | `LABDASH_DEBUG` | — | `1` for debug logs |
 
+## Integrations (all optional, configured in Settings)
+
+| Integration | What LabDash does | Credentials |
+|---|---|---|
+| **Pushover** | Down/up alerts, new-device alerts | User key + app token |
+| **Nginx Proxy Manager** | Shows whether each service's DNS name has a proxy host (and that it forwards to the right IP:port); creates missing ones from the service editor or Add Service wizard. Never edits or deletes existing hosts. | NPM admin email + password |
+| **Proxmox VE** | Read-only CPU/RAM/disk for nodes and for VMs/LXCs you link by VMID | API token with the `PVEAuditor` role |
+
+Credentials are encrypted with `LABDASH_SECRET`.
+
+## Backups
+
+Settings → Backup & restore downloads a zip of the database plus uploads, custom icons and wallpapers. A nightly backup is written to `./data/backups` (03:30, keeps the last 7 by default). Restoring stages the archive and restarts the container to apply it, so keep `restart: unless-stopped` in your compose file. The replaced database is kept as `backups/pre-restore-*.db`.
+
 ## Develop
 
 - Backend: Go 1.26 (`cmd/labdash`, `internal/*`, SQL migrations in `migrations/`).
