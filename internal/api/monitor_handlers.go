@@ -12,34 +12,35 @@ import (
 )
 
 type MonitorView struct {
-	ID             int64            `json:"id"`
-	ServiceID      *int64           `json:"serviceId"`
-	ServiceName    string           `json:"serviceName"`
-	ServiceIcon    string           `json:"serviceIcon"`
-	SectionID      *int64           `json:"sectionId"`
-	Name           string           `json:"name"`
-	Kind           string           `json:"kind"`
-	Target         string           `json:"target"`         // explicit override ('' = derived)
-	ResolvedTarget string           `json:"resolvedTarget"` // what is actually checked
-	IntervalS      int              `json:"intervalS"`
-	TimeoutS       int              `json:"timeoutS"`
-	Retries        int              `json:"retries"`
-	ExpectedStatus string           `json:"expectedStatus"`
-	Keyword        string           `json:"keyword"`
-	IgnoreTLS      bool             `json:"ignoreTls"`
-	Enabled        bool             `json:"enabled"`
-	Muted          bool             `json:"muted"`
-	Priority       int              `json:"priority"`
-	Sound          string           `json:"sound"`
-	Status         string           `json:"status"`
-	LastCheckAt    *string          `json:"lastCheckAt"`
-	LastChangeAt   *string          `json:"lastChangeAt"`
-	LastLatencyMs  *int             `json:"lastLatencyMs"`
-	LastMessage    string           `json:"lastMessage"`
-	Uptime24h      *float64         `json:"uptime24h"`
-	Uptime7d       *float64         `json:"uptime7d"`
-	Uptime30d      *float64         `json:"uptime30d"`
-	Bars           []monitor.Bucket `json:"bars"`
+	ID              int64            `json:"id"`
+	ServiceID       *int64           `json:"serviceId"`
+	ServiceName     string           `json:"serviceName"`
+	ServiceArchived bool             `json:"serviceArchived"`
+	ServiceIcon     string           `json:"serviceIcon"`
+	SectionID       *int64           `json:"sectionId"`
+	Name            string           `json:"name"`
+	Kind            string           `json:"kind"`
+	Target          string           `json:"target"`         // explicit override ('' = derived)
+	ResolvedTarget  string           `json:"resolvedTarget"` // what is actually checked
+	IntervalS       int              `json:"intervalS"`
+	TimeoutS        int              `json:"timeoutS"`
+	Retries         int              `json:"retries"`
+	ExpectedStatus  string           `json:"expectedStatus"`
+	Keyword         string           `json:"keyword"`
+	IgnoreTLS       bool             `json:"ignoreTls"`
+	Enabled         bool             `json:"enabled"`
+	Muted           bool             `json:"muted"`
+	Priority        int              `json:"priority"`
+	Sound           string           `json:"sound"`
+	Status          string           `json:"status"`
+	LastCheckAt     *string          `json:"lastCheckAt"`
+	LastChangeAt    *string          `json:"lastChangeAt"`
+	LastLatencyMs   *int             `json:"lastLatencyMs"`
+	LastMessage     string           `json:"lastMessage"`
+	Uptime24h       *float64         `json:"uptime24h"`
+	Uptime7d        *float64         `json:"uptime7d"`
+	Uptime30d       *float64         `json:"uptime30d"`
+	Bars            []monitor.Bucket `json:"bars"`
 }
 
 func (s *Server) reloadMonitors() {
@@ -52,7 +53,8 @@ func (s *Server) listMonitors(ctx context.Context, where string, args ...any) ([
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT m.id, m.service_id, COALESCE(sv.name, ''), COALESCE(sv.icon, ''), sv.section_id, m.name, m.kind, m.target,
 		       m.interval_s, m.timeout_s, m.retries, m.expected_status, m.keyword, m.ignore_tls, m.enabled, m.muted,
-		       m.pushover_priority, m.pushover_sound, m.status, m.last_check_at, m.last_change_at, m.last_latency_ms, m.last_message
+		       m.pushover_priority, m.pushover_sound, m.status, m.last_check_at, m.last_change_at, m.last_latency_ms, m.last_message,
+		       sv.archived_at IS NOT NULL
 		FROM monitors m LEFT JOIN services sv ON sv.id = m.service_id
 		WHERE `+where+` ORDER BY COALESCE(sv.name, m.name) COLLATE NOCASE, m.id`, args...)
 	if err != nil {
@@ -66,7 +68,7 @@ func (s *Server) listMonitors(ctx context.Context, where string, args ...any) ([
 		var lastCheck, lastChange sql.NullString
 		if err := rows.Scan(&m.ID, &svc, &m.ServiceName, &m.ServiceIcon, &sec, &m.Name, &m.Kind, &m.Target,
 			&m.IntervalS, &m.TimeoutS, &m.Retries, &m.ExpectedStatus, &m.Keyword, &m.IgnoreTLS, &m.Enabled, &m.Muted,
-			&m.Priority, &m.Sound, &m.Status, &lastCheck, &lastChange, &lat, &m.LastMessage); err != nil {
+			&m.Priority, &m.Sound, &m.Status, &lastCheck, &lastChange, &lat, &m.LastMessage, &m.ServiceArchived); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -86,7 +88,7 @@ func (s *Server) listMonitors(ctx context.Context, where string, args ...any) ([
 			v := int(lat.Int64)
 			m.LastLatencyMs = &v
 		}
-		if !m.Enabled {
+		if !m.Enabled || m.ServiceArchived {
 			m.Status = "paused"
 		}
 		out = append(out, &m)

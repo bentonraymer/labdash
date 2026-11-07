@@ -164,7 +164,7 @@ func (e *Engine) load(ctx context.Context) error {
 			mode = "direct"
 		}
 	}
-	cfgs, err := LoadConfigs(ctx, e.DB, mode, "m.enabled = 1")
+	cfgs, err := LoadConfigs(ctx, e.DB, mode, "m.enabled = 1 AND s.archived_at IS NULL")
 	if err != nil {
 		return err
 	}

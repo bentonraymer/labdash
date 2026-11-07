@@ -256,7 +256,7 @@ func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {
 	for _, d := range out {
 		byIP[d.IP] = append(byIP[d.IP], d)
 	}
-	rows, err = s.DB.QueryContext(ctx, `SELECT id, name, icon, direct_ip FROM services WHERE direct_ip != ''`)
+	rows, err = s.DB.QueryContext(ctx, `SELECT id, name, icon, direct_ip FROM services WHERE direct_ip != '' AND archived_at IS NULL`)
 	if err != nil {
 		serverErr(w, err)
 		return

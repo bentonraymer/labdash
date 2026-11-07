@@ -67,9 +67,10 @@ export function usePatchSettings() {
   });
 }
 
-export type ServiceInput = Partial<Omit<Service, "id" | "url" | "directUrl" | "status" | "position">> & {
+export type ServiceInput = Partial<Omit<Service, "id" | "url" | "directUrl" | "status" | "position" | "archivedAt" | "hosting" | "latencyMs">> & {
   clearPort?: boolean;
   clearSection?: boolean;
+  archived?: boolean;
 };
 
 export function useSaveService() {

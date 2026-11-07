@@ -56,7 +56,7 @@ func loadKnown(ctx context.Context, tx *sql.Tx) (known, error) {
 		}
 	}
 	rows.Close()
-	rows, err = tx.QueryContext(ctx, `SELECT direct_ip FROM services WHERE direct_ip != '' UNION SELECT ip FROM ip_assignments`)
+	rows, err = tx.QueryContext(ctx, `SELECT direct_ip FROM services WHERE direct_ip != '' AND archived_at IS NULL UNION SELECT ip FROM ip_assignments`)
 	if err != nil {
 		return k, err
 	}

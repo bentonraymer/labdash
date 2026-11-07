@@ -59,11 +59,13 @@ export interface Service {
   status: Status;
   latencyMs: number | null;
   hosting: Hosting | null;
+  archivedAt: string | null;
 }
 
 export interface Launchpad {
   sections: Section[];
   services: Service[];
+  archivedServices: Service[];
   settings: Settings;
 }
 
@@ -89,6 +91,7 @@ export interface Monitor {
   id: number;
   serviceId: number | null;
   serviceName: string;
+  serviceArchived: boolean;
   serviceIcon: string;
   sectionId: number | null;
   name: string;
@@ -391,13 +394,19 @@ export interface NPMStatus {
   proxyHosts?: number;
 }
 
-export interface ProxmoxSettings {
-  configured: boolean;
-  enabled: boolean;
+export interface ProxmoxConnection {
+  id: string;
+  name: string;
   url: string;
   verifyTls: boolean;
   tokenId: string;
   hasSecret: boolean;
+}
+
+export interface ProxmoxSettings {
+  configured: boolean;
+  enabled: boolean;
+  connections: ProxmoxConnection[];
 }
 
 export interface PveResource {
@@ -414,12 +423,14 @@ export interface PveResource {
   disk: number;
   maxdisk: number;
   uptime: number;
+  connection: string;
 }
 
 export interface ProxmoxSnapshot {
   resources: PveResource[];
   fetchedAt: string;
   error: string;
+  errors: { name: string; error: string }[];
   enabled: boolean;
 }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
 import { Trash2 } from "lucide-react";
 import { Modal } from "@/components/Modal";
-import { useDeleteMonitor, useLaunchpad, useSaveMonitor } from "@/lib/queries";
+import { useDeleteMonitor, useLaunchpad, useMonitors, useSaveMonitor } from "@/lib/queries";
 import type { Monitor, MonitorKind } from "@/lib/types";
 
 const kinds: { id: MonitorKind; label: string; hint: string }[] = [
@@ -57,6 +57,7 @@ const defaults: Form = {
 
 export function MonitorEditor({ open, onClose, monitor, serviceId }: { open: boolean; onClose: () => void; monitor: Monitor | null; serviceId?: number | null }) {
   const { data } = useLaunchpad();
+  const { data: monitors = [] } = useMonitors();
   const save = useSaveMonitor();
   const del = useDeleteMonitor();
   const [f, setF] = useState<Form>(defaults);
@@ -162,7 +163,8 @@ export function MonitorEditor({ open, onClose, monitor, serviceId }: { open: boo
             <select className="input" value={f.serviceId} onChange={(e) => set("serviceId", e.target.value)}>
               <option value="">— Standalone (explicit target) —</option>
               {data?.services
-                .slice()
+                // Only services without a monitor yet (plus this monitor's own service).
+                .filter((s) => String(s.id) === f.serviceId || !monitors.some((m) => m.serviceId === s.id && m.id !== monitor?.id))
                 .sort((a, b) => a.name.localeCompare(b.name))
                 .map((s) => (
                   <option key={s.id} value={s.id}>
@@ -170,6 +172,9 @@ export function MonitorEditor({ open, onClose, monitor, serviceId }: { open: boo
                   </option>
                 ))}
             </select>
+            {!monitor && data && data.services.every((s) => monitors.some((m) => m.serviceId === s.id)) && (
+              <p className="mt-1 text-[11px] text-faint">Every service already has a monitor. You can still add a standalone one.</p>
+            )}
           </div>
           <div>
             <label className="label">Display name</label>

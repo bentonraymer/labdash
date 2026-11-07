@@ -40,6 +40,7 @@ type Service struct {
 	QuickLinks   []QuickLink `json:"quickLinks"`
 	Tags         []string    `json:"tags"`
 	NewTab       bool        `json:"newTab"`
+	ArchivedAt   *string     `json:"archivedAt"`
 	URL          string      `json:"url"`       // resolved for current access mode
 	DirectURL    string      `json:"directUrl"` // always the IP form
 	Status       string      `json:"status"`    // from monitor; 'unknown' if none
@@ -48,19 +49,23 @@ type Service struct {
 }
 
 const serviceCols = `id, section_id, name, icon, description, position, dns_url, direct_scheme,
-	direct_ip, direct_port, direct_path, quick_links, tags, new_tab`
+	direct_ip, direct_port, direct_path, quick_links, tags, new_tab, archived_at`
 
 func scanService(sc interface{ Scan(...any) error }, mode string) (*Service, error) {
 	var sv Service
 	var port sql.NullInt64
 	var sec sql.NullInt64
 	var ql, tags string
+	var archived sql.NullString
 	if err := sc.Scan(&sv.ID, &sec, &sv.Name, &sv.Icon, &sv.Description, &sv.Position, &sv.DNSURL,
-		&sv.DirectScheme, &sv.DirectIP, &port, &sv.DirectPath, &ql, &tags, &sv.NewTab); err != nil {
+		&sv.DirectScheme, &sv.DirectIP, &port, &sv.DirectPath, &ql, &tags, &sv.NewTab, &archived); err != nil {
 		return nil, err
 	}
 	if sec.Valid {
 		sv.SectionID = &sec.Int64
+	}
+	if archived.Valid {
+		sv.ArchivedAt = &archived.String
 	}
 	if port.Valid {
 		p := int(port.Int64)
@@ -188,7 +193,16 @@ func (s *Server) handleLaunchpad(w http.ResponseWriter, r *http.Request) {
 		serverErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"sections": secs, "services": svcs, "settings": st})
+	// Archived services stay out of everything except the Services tab.
+	active, archived := []*Service{}, []*Service{}
+	for _, sv := range svcs {
+		if sv.ArchivedAt != nil {
+			archived = append(archived, sv)
+		} else {
+			active = append(active, sv)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sections": secs, "services": active, "archivedServices": archived, "settings": st})
 }
 
 // handleLayout persists drag-and-drop order: section order and, per section,
@@ -341,8 +355,9 @@ type serviceInput struct {
 	Tags         *[]string    `json:"tags"`
 	NewTab       *bool        `json:"newTab"`
 	// ClearPort/ClearSection let PATCH set nullable fields to NULL.
-	ClearPort    bool `json:"clearPort"`
-	ClearSection bool `json:"clearSection"`
+	Archived     *bool `json:"archived"`
+	ClearPort    bool  `json:"clearPort"`
+	ClearSection bool  `json:"clearSection"`
 }
 
 func (in serviceInput) validate() error {
@@ -483,10 +498,11 @@ func (s *Server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		quick_links   = COALESCE(?, quick_links),
 		tags          = COALESCE(?, tags),
 		new_tab       = COALESCE(?, new_tab),
+		archived_at   = CASE WHEN ? IS NULL THEN archived_at WHEN ? THEN COALESCE(archived_at, ?) ELSE NULL END,
 		updated_at    = ?
 		WHERE id = ?`,
 		in.ClearSection, in.SectionID, trimPtr(in.Name), in.Icon, in.Description, trimPtr(in.DNSURL), in.DirectScheme,
-		trimPtr(in.DirectIP), in.ClearPort, in.DirectPort, in.DirectPath, ql, tags, in.NewTab, now(), id)
+		trimPtr(in.DirectIP), in.ClearPort, in.DirectPort, in.DirectPath, ql, tags, in.NewTab, in.Archived, in.Archived, now(), now(), id)
 	if err != nil {
 		serverErr(w, err)
 		return

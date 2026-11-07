@@ -43,7 +43,7 @@ func (s *Server) ipUsage(ctx context.Context) (map[string][]IPOwner, error) {
 	queries := []q{
 		{`SELECT id, ip, COALESCE(NULLIF(label, ''), (SELECT name FROM services WHERE id = service_id), (SELECT name FROM hosts WHERE id = host_id), ''), kind, '' FROM ip_assignments`, "assignment"},
 		{`SELECT id, ip, name, kind, '' FROM hosts WHERE ip != ''`, "host"},
-		{`SELECT id, direct_ip, name, COALESCE(CAST(direct_port AS TEXT), ''), icon FROM services WHERE direct_ip != ''`, "service"},
+		{`SELECT id, direct_ip, name, COALESCE(CAST(direct_port AS TEXT), ''), icon FROM services WHERE direct_ip != '' AND archived_at IS NULL`, "service"},
 		{`SELECT id, ip, COALESCE(NULLIF(custom_name, ''), NULLIF(router_name, ''), NULLIF(hostname, ''), NULLIF(vendor, ''), mac), vendor, '' FROM devices
 		  WHERE ip != '' AND ignored = 0 AND last_seen >= ?`, "device"},
 	}
@@ -331,7 +331,7 @@ func (s *Server) portRows(ctx context.Context, ip string) ([]PortRow, error) {
 		order = append(order, k)
 		return p
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, icon, direct_port FROM services WHERE direct_ip = ? AND direct_port IS NOT NULL`, ip)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, icon, direct_port FROM services WHERE direct_ip = ? AND direct_port IS NOT NULL AND archived_at IS NULL`, ip)
 	if err != nil {
 		return nil, err
 	}

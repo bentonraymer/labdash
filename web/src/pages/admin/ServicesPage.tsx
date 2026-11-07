@@ -1,8 +1,9 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import clsx from "clsx";
-import { ArrowDown, ArrowUp, Download, ExternalLink, Plus } from "lucide-react";
-import { useLaunchpad, useNPMStatus } from "@/lib/queries";
+import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Download, ExternalLink, Plus, Trash2 } from "lucide-react";
+import { useDeleteService, useLaunchpad, useNPMStatus, useSaveService } from "@/lib/queries";
+import { ago, fmtDateTime } from "@/lib/time";
 import { NPMBadge, PveStats, useServiceGuest } from "@/components/IntegrationBits";
 import { runtimeLabel, runtimeTone } from "@/lib/labels";
 import type { Runtime, Service } from "@/lib/types";
@@ -22,6 +23,8 @@ export function ServicesPage() {
   const guestOf = useServiceGuest();
   const showNPM = !!npm?.enabled;
   const [filter, setFilter] = useState("");
+  const [view, setView] = useState<"active" | "archived">("active");
+  const archived = data?.archivedServices ?? [];
   const [runtime, setRuntime] = useState<Runtime | "all" | "none">("all");
   const [node, setNode] = useState("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
@@ -132,6 +135,27 @@ export function ServicesPage() {
           </>
         }
       />
+      <div className="flex gap-1 border-b border-line px-6">
+        {(
+          [
+            ["active", `Active (${services.length})`],
+            ["archived", `Archived (${archived.length})`],
+          ] as const
+        ).map(([v, label]) => (
+          <button
+            key={v}
+            onClick={() => setView(v)}
+            className={clsx("-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition", view === v ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg")}
+          >
+            {v === "archived" && <Archive size={13} />}
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === "archived" ? (
+        <ArchivedTable services={archived} sectionName={sectionName} />
+      ) : (
+      <>
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-6 py-3">
         <input className="input w-64 py-1.5" placeholder="Filter by name, IP, host, tag…" value={filter} onChange={(e) => setFilter(e.target.value)} />
         <div className="flex rounded-md border border-line-2 p-0.5">
@@ -236,6 +260,70 @@ export function ServicesPage() {
           </tbody>
         </table>
       </div>
+      </>
+      )}
     </>
   );
 }
+
+/** Archived services: kept for their docs and history, out of everything else. */
+function ArchivedTable({ services, sectionName }: { services: Service[]; sectionName: Map<number, string> }) {
+  const ui = useUI();
+  const save = useSaveService();
+  const del = useDeleteService();
+  if (services.length === 0) {
+    return <p className="px-6 py-10 text-center text-sm text-muted">No archived services. Archive one from its editor when you retire it; its docs and history are kept.</p>;
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[13px]">
+        <thead className="border-b border-line bg-panel text-xs text-muted">
+          <tr>
+            <th className="px-3 py-2 text-left font-medium">Name</th>
+            <th className="px-3 py-2 text-left font-medium">Archived</th>
+            <th className="px-3 py-2 text-left font-medium">Was on</th>
+            <th className="px-3 py-2 text-left font-medium">IP</th>
+            <th className="px-3 py-2 text-left font-medium">Section</th>
+            <th className="w-48" />
+          </tr>
+        </thead>
+        <tbody>
+          {services
+            .slice()
+            .sort((a, b) => (b.archivedAt ?? "").localeCompare(a.archivedAt ?? ""))
+            .map((s) => (
+              <tr key={s.id} onClick={() => ui.editService(s)} className="cursor-pointer border-b border-line/70 opacity-80 hover:bg-white/[0.03] hover:opacity-100">
+                <td className="px-3 py-2">
+                  <div className="flex items-center gap-2.5">
+                    <ServiceIcon icon={s.icon} name={s.name} className="size-5 grayscale" />
+                    <span className="font-medium">{s.name}</span>
+                  </div>
+                </td>
+                <td className="px-3 py-2 text-xs text-muted" title={s.archivedAt ? fmtDateTime(s.archivedAt) : ""}>
+                  {ago(s.archivedAt)}
+                </td>
+                <td className="px-3 py-2 text-xs text-muted">{s.hosting ? `${runtimeLabel[s.hosting.runtime]}${s.hosting.hostName ? ` · ${s.hosting.hostName}` : ""}` : "—"}</td>
+                <td className="px-3 py-2 font-mono text-xs text-muted">{s.directIp ? `${s.directIp}${s.directPort ? `:${s.directPort}` : ""}` : "—"}</td>
+                <td className="px-3 py-2 text-xs text-muted">{sectionName.get(s.sectionId ?? -1) ?? "—"}</td>
+                <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex justify-end gap-1">
+                    <button className="btn-outline py-1 text-xs" onClick={() => save.mutate({ id: s.id, archived: false })} disabled={save.isPending}>
+                      <ArchiveRestore size={13} /> Restore
+                    </button>
+                    <button
+                      className="btn-ghost p-1.5 hover:text-down"
+                      title="Delete permanently"
+                      onClick={() => confirm(`Delete “${s.name}” permanently? Its monitor history goes too; its docs page is kept as an unlinked note.`) && del.mutate(s.id)}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+

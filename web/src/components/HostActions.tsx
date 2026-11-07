@@ -41,7 +41,7 @@ export function useHostLinks() {
     if ((h.kind === "vm" || h.kind === "lxc") && h.vmid) {
       // Console through the parent node (or the configured API URL).
       const parent = h.parentId ? byId.get(h.parentId) : undefined;
-      const base = parent?.ip ? `https://${parent.ip}:8006` : pve?.url?.replace(/\/+$/, "");
+      const base = parent?.ip ? `https://${parent.ip}:8006` : pve?.connections[0]?.url?.replace(/\/+$/, "");
       if (base) {
         const type = h.kind === "lxc" ? "lxc" : "qemu";
         const node = parent?.name ?? "";
