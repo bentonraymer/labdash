@@ -24,7 +24,8 @@ type wizardInput struct {
 		Kind      string `json:"kind"`
 		IntervalS int    `json:"intervalS"`
 	} `json:"monitor"`
-	CreateNote bool `json:"createNote"`
+	CreateNote bool            `json:"createNote"`
+	NPM        *npmCreateInput `json:"npm"`
 }
 
 type wizardStep struct {
@@ -178,6 +179,18 @@ func (s *Server) handleServiceWizard(w http.ResponseWriter, r *http.Request) {
 			defer cancel()
 			_, _, _ = s.Monitor.CheckNow(cctx, monitorID)
 		}()
+	}
+	// NPM is an external system, so it runs after the commit: a failure is
+	// reported as a failed step instead of undoing the service.
+	if in.NPM != nil {
+		nctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		detail, err := s.createProxyHostFor(nctx, id, *in.NPM)
+		cancel()
+		if err != nil {
+			steps = append(steps, wizardStep{"Nginx Proxy Manager host", false, err.Error()})
+		} else {
+			steps = append(steps, wizardStep{"Nginx Proxy Manager host", true, detail})
+		}
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"serviceId": id, "steps": steps})
 }

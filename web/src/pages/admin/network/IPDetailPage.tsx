@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { useDeletePortClaim, useIPDetail, useLaunchpad, useSavePortClaim } from "@/lib/queries";
 import { ServiceIcon } from "@/components/ServiceIcon";
 import { PageHeader } from "../AdminLayout";
+import { WakeButton } from "@/components/HostActions";
 import { cellStyle, stateLabel } from "./ipStyles";
 
 const sourceLabel = { service: "Service", claim: "Claimed", scan: "Scan only" } as const;
@@ -53,9 +54,12 @@ export function IPDetailPage() {
         title={ip}
         subtitle={`${data.subnet ? `${data.subnet.name || data.subnet.cidr} · ` : ""}${claimed} claimed port${claimed === 1 ? "" : "s"}${data.mac ? ` · MAC ${data.mac}` : ""}`}
         actions={
+          <>
+          {data.mac && <WakeButton mac={data.mac} ip={ip} />}
           <Link to="/network/ips" className="btn-ghost py-1.5">
             <ArrowLeft size={15} /> All IPs
           </Link>
+          </>
         }
       />
       <div className="grid gap-6 p-6 xl:grid-cols-[minmax(0,1fr)_320px]">

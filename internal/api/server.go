@@ -24,7 +24,10 @@ import (
 	"github.com/bentonraymer/labdash/internal/icons"
 	"github.com/bentonraymer/labdash/internal/integrations"
 	"github.com/bentonraymer/labdash/internal/monitor"
+	"github.com/bentonraymer/labdash/internal/npm"
+	"github.com/bentonraymer/labdash/internal/proxmox"
 	"github.com/bentonraymer/labdash/internal/pushover"
+	"github.com/bentonraymer/labdash/internal/scanner"
 	"github.com/bentonraymer/labdash/internal/secrets"
 )
 
@@ -38,8 +41,15 @@ type Server struct {
 	Monitor      *monitor.Engine
 	Integrations *integrations.Store
 	Pushover     *pushover.Client
-	Web          fs.FS // built frontend (web/dist)
-	Version      string
+	Scanner      *scanner.Service
+	NPM          *npm.Client
+	Proxmox      *proxmox.Poller
+	// Restart exits the process so Docker restarts it (used to apply a restore).
+	Restart func()
+
+	npmCache npmCache
+	Web      fs.FS // built frontend (web/dist)
+	Version  string
 }
 
 func (s *Server) Router() http.Handler {
@@ -50,6 +60,9 @@ func (s *Server) Router() http.Handler {
 	r.Handle("/icons/di/*", s.Icons)
 	r.Get("/icons/custom/*", s.Icons.ServeCustom)
 	r.Handle("/media/wallpapers/*", http.StripPrefix("/media/wallpapers/", noDirListing(http.Dir(filepath.Join(s.Cfg.DataDir, "wallpapers")))))
+
+	// Note attachments need a session (they may contain configs/secrets).
+	r.With(s.Auth.Middleware).Get("/media/uploads/*", s.handleServeUpload)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Use(jsonOnly, csrfHeader)
@@ -108,6 +121,52 @@ func (s *Server) Router() http.Handler {
 			r.Delete("/ip-assignments/{ip}", s.handleDeleteAssignment)
 			r.Post("/port-claims", s.handleCreatePortClaim)
 			r.Delete("/port-claims/{id}", s.handleDeletePortClaim)
+
+			r.Get("/integrations/npm", s.handleGetNPM)
+			r.Put("/integrations/npm", s.handlePutNPM)
+			r.Post("/integrations/npm/test", s.handleTestNPM)
+			r.Get("/npm/status", s.handleNPMStatus)
+			r.Post("/services/{id}/npm", s.handleNPMCreate)
+			r.Get("/integrations/proxmox", s.handleGetProxmox)
+			r.Put("/integrations/proxmox", s.handlePutProxmox)
+			r.Post("/integrations/proxmox/test", s.handleTestProxmox)
+			r.Get("/proxmox/resources", s.handleProxmoxResources)
+			r.Post("/wol", s.handleWOL)
+			r.Get("/backup", s.handleBackupDownload)
+			r.Get("/backups", s.handleListBackups)
+			r.Post("/backups", s.handleCreateBackup)
+			r.Get("/backups/{name}", s.handleStoredBackup)
+			r.Delete("/backups/{name}", s.handleStoredBackup)
+			r.Post("/restore", s.handleRestore)
+
+			r.Get("/folders", s.handleListFolders)
+			r.Post("/folders", s.handleSaveFolder)
+			r.Patch("/folders/{id}", s.handleSaveFolder)
+			r.Delete("/folders/{id}", s.handleDeleteFolder)
+			r.Get("/notes", s.handleListNotes)
+			r.Post("/notes", s.handleCreateNote)
+			r.Get("/notes/search", s.handleSearchNotes)
+			r.Get("/notes/{id}", s.handleGetNote)
+			r.Patch("/notes/{id}", s.handleUpdateNote)
+			r.Delete("/notes/{id}", s.handleDeleteNote)
+			r.Post("/notes/{id}/snapshot", s.handleSnapshot)
+			r.Get("/notes/{id}/versions", s.handleListVersions)
+			r.Get("/notes/{id}/versions/{vid}", s.handleGetVersion)
+			r.Post("/notes/{id}/versions/{vid}/restore", s.handleRestoreVersion)
+			r.Post("/notes/{id}/attachments", s.handleUploadAttachment)
+			r.Get("/tags", s.handleListTags)
+
+			r.Get("/scan-targets", s.handleListScanTargets)
+			r.Post("/scan-targets", s.handleSaveScanTarget)
+			r.Put("/scan-targets/{id}", s.handleSaveScanTarget)
+			r.Delete("/scan-targets/{id}", s.handleDeleteScanTarget)
+			r.Post("/scan-targets/{id}/run", s.handleRunScanTarget)
+			r.Get("/scans", s.handleScanStatus)
+			r.Get("/devices", s.handleListDevices)
+			r.Post("/devices/acknowledge-all", s.handleAcknowledgeAll)
+			r.Patch("/devices/{id}", s.handleUpdateDevice)
+			r.Delete("/devices/{id}", s.handleDeleteDevice)
+			r.Get("/devices/{id}/events", s.handleDeviceEvents)
 
 			r.Get("/monitors", s.handleListMonitors)
 			r.Post("/monitors", s.handleCreateMonitor)

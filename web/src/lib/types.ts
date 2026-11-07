@@ -15,6 +15,9 @@ export interface Settings {
   wallpaper_blur: number;
   wallpaper_dim: number;
   alerts_paused: boolean;
+  new_device_alerts: boolean;
+  backup_auto: boolean;
+  backup_keep: number;
   tile_glow: boolean;
   open_new_tab: boolean;
 }
@@ -236,4 +239,187 @@ export interface IPCheck {
   inDhcp?: boolean;
   reserved?: boolean;
   portOwner?: string;
+}
+
+// ── Scanning ──────────────────────────────────────────────────────────────
+export type PortProfile = "top100" | "top1000" | "full" | "custom";
+
+export interface ScanTarget {
+  id: number;
+  cidr: string;
+  name: string;
+  schedule: string;
+  portProfile: PortProfile;
+  customPorts: string;
+  enabled: boolean;
+  lastRunAt: string | null;
+}
+
+export interface ScanStatus {
+  running: boolean;
+  targetId: number;
+  cidr: string;
+  phase: string;
+  percent: number;
+  started: string;
+  queued: number[];
+}
+
+export interface ScanRun {
+  id: number;
+  cidr: string;
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "done" | "failed";
+  hostsUp: number;
+  error: string;
+}
+
+export interface DevicePort {
+  port: number;
+  proto: string;
+  state: "open" | "closed";
+  service: string;
+  product: string;
+  version: string;
+  title: string;
+  favicon: string;
+  lastSeen: string;
+}
+
+export interface Device {
+  id: number;
+  mac: string;
+  ip: string;
+  hostname: string;
+  vendor: string;
+  osName: string;
+  osFamily: string;
+  deviceType: string;
+  isUp: boolean;
+  acknowledged: boolean;
+  ignored: boolean;
+  notes: string;
+  firstSeen: string;
+  lastSeen: string;
+  host: { id: number; name: string } | null;
+  services: { id: number; name: string; icon?: string }[];
+  ports: DevicePort[];
+}
+
+export interface DeviceEvent {
+  ts: string;
+  kind: string;
+  detail: string;
+}
+
+// ── Docs ──────────────────────────────────────────────────────────────────
+export interface Folder {
+  id: number;
+  parentId: number | null;
+  name: string;
+  position: number;
+  noteCount: number;
+}
+
+export interface NoteSummary {
+  id: number;
+  title: string;
+  folderId: number | null;
+  serviceId: number | null;
+  serviceName: string;
+  serviceIcon: string;
+  pinned: boolean;
+  tags: string[];
+  updatedAt: string;
+  snippet: string;
+}
+
+export interface Note extends NoteSummary {
+  body: string;
+  createdAt: string;
+}
+
+export interface NoteVersion {
+  id: number;
+  title: string;
+  createdAt: string;
+  size: number;
+}
+
+export interface NoteHit {
+  id: number;
+  title: string;
+  snippet: string; // matches wrapped in [[ ]]
+  serviceName: string;
+}
+
+// ── Integrations ──────────────────────────────────────────────────────────
+export interface NPMSettings {
+  configured: boolean;
+  enabled: boolean;
+  url: string;
+  verifyTls: boolean;
+  email: string;
+  hasPassword: boolean;
+}
+
+export interface NPMServiceStatus {
+  state: "ok" | "mismatch" | "missing" | "none";
+  proxyHostId?: number;
+  forward?: string;
+  detail?: string;
+}
+
+export interface NPMCert {
+  id: number;
+  name: string;
+  domains: string[];
+  expiresOn: string;
+}
+
+export interface NPMStatus {
+  enabled: boolean;
+  error?: string;
+  services?: Record<string, NPMServiceStatus>;
+  certificates?: NPMCert[];
+  proxyHosts?: number;
+}
+
+export interface ProxmoxSettings {
+  configured: boolean;
+  enabled: boolean;
+  url: string;
+  verifyTls: boolean;
+  tokenId: string;
+  hasSecret: boolean;
+}
+
+export interface PveResource {
+  id: string;
+  type: "node" | "qemu" | "lxc";
+  node: string;
+  vmid?: number;
+  name?: string;
+  status: string;
+  cpu: number;
+  maxcpu: number;
+  mem: number;
+  maxmem: number;
+  disk: number;
+  maxdisk: number;
+  uptime: number;
+}
+
+export interface ProxmoxSnapshot {
+  resources: PveResource[];
+  fetchedAt: string;
+  error: string;
+  enabled: boolean;
+}
+
+export interface StoredBackup {
+  name: string;
+  size: number;
+  createdAt: string;
 }

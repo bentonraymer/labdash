@@ -2,7 +2,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import clsx from "clsx";
 import { ArrowDown, ArrowUp, Download, ExternalLink, Plus } from "lucide-react";
-import { useLaunchpad } from "@/lib/queries";
+import { useLaunchpad, useNPMStatus } from "@/lib/queries";
+import { NPMBadge, PveStats, useServiceGuest } from "@/components/IntegrationBits";
 import { runtimeLabel, runtimeTone } from "@/lib/labels";
 import type { Runtime, Service } from "@/lib/types";
 import { ServiceIcon } from "@/components/ServiceIcon";
@@ -17,6 +18,9 @@ const ipKey = (ip: string) => ip.split(".").map((p) => p.padStart(3, "0")).join(
 export function ServicesPage() {
   const { data } = useLaunchpad();
   const ui = useUI();
+  const { data: npm } = useNPMStatus();
+  const guestOf = useServiceGuest();
+  const showNPM = !!npm?.enabled;
   const [filter, setFilter] = useState("");
   const [runtime, setRuntime] = useState<Runtime | "all" | "none">("all");
   const [node, setNode] = useState("all");
@@ -167,6 +171,8 @@ export function ServicesPage() {
               <Th k="ip">IP</Th>
               <Th k="port">Port</Th>
               <Th k="dns">DNS URL</Th>
+              {showNPM && <th className="px-3 py-2 text-left font-medium">NPM</th>}
+              <th className="px-3 py-2 text-left font-medium">Load</th>
               <Th k="section">Section</Th>
               <th className="w-10" />
             </tr>
@@ -204,6 +210,12 @@ export function ServicesPage() {
                 </td>
                 <td className="px-3 py-2 font-mono text-xs">{s.directPort ?? "—"}</td>
                 <td className="max-w-[260px] truncate px-3 py-2 font-mono text-xs text-muted">{s.dnsUrl || "—"}</td>
+                {showNPM && (
+                  <td className="px-3 py-2">
+                    {npm?.error ? <span className="text-[11px] text-down" title={npm.error}>error</span> : <NPMBadge status={npm?.services?.[s.id]} />}
+                  </td>
+                )}
+                <td className="px-3 py-2">{(() => { const g = guestOf(s); return g ? <PveStats r={g} compact /> : <span className="text-faint">—</span>; })()}</td>
                 <td className="px-3 py-2 whitespace-nowrap text-muted">{sectionName.get(s.sectionId ?? -1) ?? "—"}</td>
                 <td className="px-3 py-2">
                   {s.url && (
@@ -216,7 +228,7 @@ export function ServicesPage() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-3 py-10 text-center text-muted">
+                <td colSpan={13} className="px-3 py-10 text-center text-muted">
                   No services match.
                 </td>
               </tr>

@@ -107,7 +107,7 @@ export function ComingSoon({ title, phase, children }: { title: string; phase: n
       <PageHeader title={title} />
       <div className="p-6">
         <div className="max-w-2xl rounded-lg border border-dashed border-line-2 bg-panel/50 p-6">
-          <div className="mb-2 inline-block rounded bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">Build phase {phase}</div>
+          {phase > 0 && <div className="mb-2 inline-block rounded bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">Build phase {phase}</div>}
           <div className="text-sm leading-relaxed text-muted">{children}</div>
         </div>
       </div>

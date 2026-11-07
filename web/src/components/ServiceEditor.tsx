@@ -1,9 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { ImagePlus, Plus, Trash2, X } from "lucide-react";
+import { FileText, ImagePlus, Plus, Trash2, X } from "lucide-react";
+import { useOpenServiceDocs } from "@/lib/serviceDocs";
 import { Modal } from "./Modal";
 import { ServiceIcon } from "./ServiceIcon";
 import { IconPicker } from "./IconPicker";
 import { useDeleteService, useLaunchpad, useSaveDeployment, useSaveMonitor, useSaveService } from "@/lib/queries";
+import { NPMPanel } from "./NPMPanel";
 import { HostingFields, hostingFromService, hostingToInput, type HostingForm } from "./HostingFields";
 import { slugifyIconName } from "@/lib/icons";
 import type { QuickLink, Service } from "@/lib/types";
@@ -75,6 +77,7 @@ export function ServiceEditor({
   const [addMonitor, setAddMonitor] = useState(true);
   const saveMonitor = useSaveMonitor();
   const saveDeployment = useSaveDeployment();
+  const openDocs = useOpenServiceDocs();
   const [hosting, setHosting] = useState<HostingForm>(hostingFromService(null));
   const domain = data?.settings.dns_domain || "";
 
@@ -158,6 +161,18 @@ export function ServiceEditor({
           {service && (
             <button type="button" className="btn-danger mr-auto" onClick={remove} disabled={del.isPending}>
               <Trash2 size={15} /> Delete
+            </button>
+          )}
+          {service && (
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => {
+                onClose();
+                openDocs(service.id, service.name);
+              }}
+            >
+              <FileText size={15} /> Docs
             </button>
           )}
           {save.error && <span className="mr-2 text-sm text-down">{save.error.message}</span>}
@@ -260,6 +275,8 @@ export function ServiceEditor({
           </div>
           {directPreview && <p className="mt-2 font-mono text-xs text-muted">→ {directPreview}</p>}
         </fieldset>
+
+        {service && <NPMPanel serviceId={service.id} dnsUrl={service.dnsUrl} hasDirect={!!service.directIp && !!service.directPort} />}
 
         <fieldset className="rounded-lg border border-line p-4">
           <legend className="px-1 text-xs font-semibold text-muted">Hosting</legend>

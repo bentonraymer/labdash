@@ -7,7 +7,8 @@ import { ServiceIcon } from "./ServiceIcon";
 import { IconPicker } from "./IconPicker";
 import { HostingFields, emptyHosting, hostingToInput, type HostingForm } from "./HostingFields";
 import { api, ApiError } from "@/lib/api";
-import { checkIP, useHosts, useLaunchpad, useSubnets } from "@/lib/queries";
+import { checkIP, useHosts, useLaunchpad, useNPMStatus, useSubnets } from "@/lib/queries";
+import { CertPicker, defaultCert } from "./NPMPanel";
 import { slugifyIconName } from "@/lib/icons";
 import { runtimeLabel } from "@/lib/labels";
 import type { IPCheck } from "@/lib/types";
@@ -32,6 +33,11 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   const { data: subnets = [] } = useSubnets();
   const { data: hosts = [] } = useHosts();
   const domain = lp?.settings.dns_domain ?? "";
+  const { data: npmStatus } = useNPMStatus();
+  const npmReady = !!npmStatus?.enabled && !npmStatus.error;
+  const certs = npmStatus?.certificates ?? [];
+  const [npm, setNpm] = useState(true);
+  const [cert, setCert] = useState(0);
 
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
@@ -78,6 +84,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
     setMonitor("http");
     setInterval(60);
     setNote(true);
+    setNpm(true);
     setCheck(null);
     setErr("");
     setResult(null);
@@ -110,6 +117,9 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   }, [ip, port]);
 
   const dnsUrl = useDns && sub && domain ? `https://${sub}.${domain}` : "";
+  useEffect(() => setCert(defaultCert(certs, dnsUrl ? new URL(dnsUrl).hostname : "")), [certs, dnsUrl]);
+  const canNPM = npmReady && !!dnsUrl && !!ip.trim() && !!port;
+
   const directPreview = ip ? `${scheme}://${ip}${port ? `:${port}` : ""}${path ? (path.startsWith("/") ? path : `/${path}`) : ""}` : "";
   const dockerOnSharedIp = hosting.runtime === "docker";
   const portTaken = !!check?.portOwner;
@@ -138,6 +148,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
         extraPorts: extra.filter((p) => p.port).map((p) => ({ port: Number(p.port), proto: p.proto, label: p.label })),
         monitor: monitor ? { kind: monitor, intervalS: interval } : null,
         createNote: note,
+        npm: npm && canNPM ? { certificateId: cert, sslForced: cert > 0, websockets: true } : null,
       });
       setResult(res);
       qc.invalidateQueries();
@@ -153,18 +164,18 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
 
   if (result) {
     return (
-      <Modal open={open} onClose={onClose} title="Service created" width="max-w-xl" footer={<button className="btn-primary" onClick={onClose}>Done</button>}>
+      <Modal open={open} onClose={onClose} title={result.steps.every((s) => s.ok) ? "Service created" : "Service created — one step failed"} width="max-w-xl" footer={<button className="btn-primary" onClick={onClose}>Done</button>}>
         <div className="grid gap-2">
           {result.steps.map((s, i) => (
             <div key={i} className="flex items-start gap-3 rounded-md bg-white/[0.03] px-3 py-2">
-              <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-up" />
+              {s.ok ? <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-up" /> : <AlertTriangle size={16} className="mt-0.5 shrink-0 text-down" />}
               <div>
                 <div className="text-sm font-medium">{s.step}</div>
                 <div className="text-xs text-muted">{s.detail}</div>
               </div>
             </div>
           ))}
-          <p className="mt-2 text-xs text-faint">Creating the Nginx Proxy Manager host for the DNS name will be added here in build phase 7.</p>
+
         </div>
       </Modal>
     );
@@ -370,7 +381,27 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
           </Option>
           <Option checked={reserveIp && !!ip} disabled={!ip || dockerOnSharedIp} onChange={setReserveIp} title="Mark the IP as static" desc={dockerOnSharedIp ? "Docker services share their host's IP, so it's not reserved separately." : ip ? `Records ${ip} as a static assignment in IP Addresses.` : "No IP entered."} />
           <Option checked={note} onChange={setNote} title="Create a docs page" desc="A markdown page pre-filled with access details and hosting, ready for config notes." />
-          <Option checked={false} disabled onChange={() => {}} title="Create Nginx Proxy Manager host" desc="Coming in build phase 7 (NPM integration)." />
+          <Option
+            checked={npm && canNPM}
+            disabled={!canNPM}
+            onChange={setNpm}
+            title="Create Nginx Proxy Manager host"
+            desc={
+              !npmReady
+                ? npmStatus?.error
+                  ? `NPM error: ${npmStatus.error}`
+                  : "Connect NPM in Settings to enable this."
+                : !dnsUrl || !ip.trim() || !port
+                  ? "Needs a DNS name plus a direct IP and port to forward to."
+                  : `${dnsUrl.replace("https://", "")} → ${scheme}://${ip}:${port}`
+            }
+          >
+            {npm && canNPM && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-muted">
+                SSL certificate <CertPicker certs={certs} domain={dnsUrl ? new URL(dnsUrl).hostname : ""} value={cert} onChange={setCert} />
+              </div>
+            )}
+          </Option>
         </div>
       )}
 
@@ -398,6 +429,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
           <Review label="Monitor" value={monitor ? `${monitor.toUpperCase()} every ${interval}s` : "None"} />
           <Review label="IP reservation" value={reserveIp && ip && !dockerOnSharedIp ? `${ip} → static` : "No"} />
           <Review label="Docs page" value={note ? "Yes" : "No"} />
+          <Review label="NPM proxy host" value={npm && canNPM ? `Yes${cert ? ` · ${certs.find((c) => c.id === cert)?.name ?? "certificate"}` : " · HTTP only"}` : "No"} />
         </div>
       )}
     </Modal>

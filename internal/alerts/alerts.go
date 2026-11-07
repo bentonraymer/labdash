@@ -11,6 +11,7 @@ import (
 	"github.com/bentonraymer/labdash/internal/integrations"
 	"github.com/bentonraymer/labdash/internal/monitor"
 	"github.com/bentonraymer/labdash/internal/pushover"
+	"github.com/bentonraymer/labdash/internal/scanner"
 )
 
 type Pushover struct {
@@ -86,4 +87,45 @@ func HumanDuration(d time.Duration) string {
 
 func esc(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
+}
+
+// NewDevices alerts about devices seen for the first time, unless the
+// "new_device_alerts" setting is off or alerts are paused.
+func (p *Pushover) NewDevices(ctx context.Context, enabled func(context.Context) bool, devices []scanner.NewDevice) {
+	if len(devices) == 0 || (enabled != nil && !enabled(ctx)) {
+		return
+	}
+	sec, cfg, err := p.Load(ctx)
+	if err != nil {
+		return
+	}
+	var b strings.Builder
+	for i, d := range devices {
+		if i == 8 {
+			fmt.Fprintf(&b, "…and %d more", len(devices)-8)
+			break
+		}
+		name := d.Hostname
+		if name == "" {
+			name = d.Vendor
+		}
+		if name == "" {
+			name = "unknown vendor"
+		}
+		fmt.Fprintf(&b, "<b>%s</b> %s", esc(d.IP), esc(name))
+		if d.MAC != "" {
+			fmt.Fprintf(&b, " <font color=\"#888888\">%s</font>", esc(d.MAC))
+		}
+		b.WriteString("\n")
+	}
+	title := "🆕 New device on your network"
+	if len(devices) > 1 {
+		title = fmt.Sprintf("🆕 %d new devices on your network", len(devices))
+	}
+	m := pushover.Message{Title: title, Body: strings.TrimSpace(b.String()), HTML: true}
+	if cfg.BaseURL != "" {
+		m.URL = strings.TrimRight(cfg.BaseURL, "/") + "/network/devices"
+		m.URLTitle = "Review in LabDash"
+	}
+	_ = p.Client.Send(ctx, sec, cfg, m)
 }

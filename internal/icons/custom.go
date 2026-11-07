@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -200,4 +201,38 @@ func findIconLinks(html []byte, base *url.URL) []string {
 		out[i] = c.url
 	}
 	return out
+}
+
+var titleRe = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+
+// Probe loads a web page and returns its <title> and a stored copy of its
+// favicon ("" if none). Used by the network scanner for web ports.
+func (c *Cache) Probe(ctx context.Context, pageURL string) (title, favicon string, err error) {
+	u, err := url.Parse(pageURL)
+	if err != nil || u.Host == "" {
+		return "", "", errors.New("bad url")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	body, final, err := get(ctx, u.String(), 256<<10)
+	if err != nil {
+		return "", "", err
+	}
+	if m := titleRe.FindSubmatch(body); m != nil {
+		title = strings.Join(strings.Fields(html.UnescapeString(string(m[1]))), " ")
+		if len(title) > 120 {
+			title = title[:120]
+		}
+	}
+	cands := append(findIconLinks(body, final), u.Scheme+"://"+u.Host+"/favicon.ico")
+	for _, cand := range cands[:min(len(cands), 4)] {
+		b, _, err := get(ctx, cand, maxIconBytes)
+		if err != nil {
+			continue
+		}
+		if p, err := c.SaveCustom(b); err == nil {
+			return title, p, nil
+		}
+	}
+	return title, "", nil
 }

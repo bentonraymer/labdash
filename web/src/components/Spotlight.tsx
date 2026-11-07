@@ -22,7 +22,9 @@ import {
 } from "lucide-react";
 import { fuzzyMatch, frecencyBoost } from "@/lib/fuzzy";
 import { api } from "@/lib/api";
-import { keys, useLaunchpad, usePatchSettings, useSpotlightUsage } from "@/lib/queries";
+import { keys, searchNotes, useDevices, useLaunchpad, usePatchSettings, useSpotlightUsage } from "@/lib/queries";
+import { useOpenServiceDocs } from "@/lib/serviceDocs";
+import type { NoteHit } from "@/lib/types";
 import type { Service } from "@/lib/types";
 import { ServiceIcon } from "./ServiceIcon";
 import { StatusDot } from "./StatusDot";
@@ -31,9 +33,11 @@ import { useUI } from "./UIProvider";
 type Result =
   | { kind: "service"; id: string; title: string; subtitle: string; score: number; indices: number[]; service: Service }
   | { kind: "link"; id: string; title: string; subtitle: string; score: number; indices: number[]; service: Service; url: string }
+  | { kind: "note"; id: string; title: string; subtitle: string; score: number; indices: number[]; noteId: number }
+  | { kind: "device"; id: string; title: string; subtitle: string; score: number; indices: number[]; ip: string; up: boolean }
   | { kind: "action"; id: string; title: string; subtitle: string; score: number; indices: number[]; icon: LucideIcon; run: () => void };
 
-const groupLabel: Record<Result["kind"], string> = { service: "Services", link: "Quick links", action: "Actions" };
+const groupLabel: Record<Result["kind"], string> = { service: "Services", link: "Quick links", note: "Notes", device: "Devices", action: "Actions" };
 
 const ipLike = /^(\d{1,3}\.){3}\d{1,3}(:\d{1,5})?(\/.*)?$/;
 
@@ -44,6 +48,18 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
   const listRef = useRef<HTMLDivElement>(null);
   const { data } = useLaunchpad();
   const { data: usage } = useSpotlightUsage();
+  const { data: devices } = useDevices();
+  const openDocs = useOpenServiceDocs();
+  const [noteHits, setNoteHits] = useState<NoteHit[]>([]);
+  useEffect(() => {
+    const term = q.trim();
+    if (!open || term.length < 2) {
+      setNoteHits([]);
+      return;
+    }
+    const t = setTimeout(() => searchNotes(term).then(setNoteHits).catch(() => setNoteHits([])), 150);
+    return () => clearTimeout(t);
+  }, [q, open]);
   const patch = usePatchSettings();
   const navigate = useNavigate();
   const ui = useUI();
@@ -82,6 +98,7 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
         run: () => patch.mutate({ alerts_paused: !settings?.alerts_paused }),
         keywords: "mute silence notifications pushover",
       },
+      { id: "new-note", title: "New note", subtitle: "Create a markdown note", icon: FileText, run: () => api.post<{ id: number }>("/api/notes", { title: "Untitled" }).then((n) => navigate(`/docs/${n.id}`)), keywords: "docs write document" },
       { id: "go-launchpad", title: "Launchpad", subtitle: "Go to", icon: LayoutGrid, run: go("/"), keywords: "home dashboard" },
       { id: "go-services", title: "Services table", subtitle: "Go to", icon: Table, run: go("/services"), keywords: "inventory hosting" },
       { id: "go-status", title: "Status", subtitle: "Go to", icon: Activity, run: go("/status"), keywords: "uptime monitors" },
@@ -136,6 +153,40 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
         });
       }
     }
+    // Notes: full-text hits from the server (title matches rank higher).
+    noteHits.forEach((h, i) => {
+      const m = fuzzyMatch(query, h.title);
+      out.push({
+        kind: "note",
+        id: `n${h.id}`,
+        title: h.title,
+        subtitle: h.snippet.replace(/\[\[|\]\]/g, "") || h.serviceName || "Note",
+        score: Math.max(m?.score ?? 0, 300) * 0.75 - i,
+        indices: m?.indices ?? [],
+        noteId: h.id,
+      });
+    });
+    // Scanned devices: match hostname, IP, vendor or MAC. Only when typing.
+    if (query) {
+      for (const d of devices ?? []) {
+        if (d.ignored) continue;
+        const title = d.hostname || d.ip;
+        const m = fuzzyMatch(query, title);
+        const other = [d.ip, d.vendor, d.mac].map((t) => (t ? fuzzyMatch(query, t) : null)).reduce((b, x) => (x && x.score > b ? x.score : b), -1);
+        const score = Math.max(m?.score ?? -1, other > 0 ? other * 0.7 : -1);
+        if (score < 0) continue;
+        out.push({
+          kind: "device",
+          id: `d${d.id}`,
+          title,
+          subtitle: [d.hostname ? d.ip : "", d.vendor, d.osName].filter(Boolean).join(" · ") || "Network device",
+          score: score * 0.8,
+          indices: m?.indices ?? [],
+          ip: d.ip,
+          up: d.isUp,
+        });
+      }
+    }
     // Typing a raw IP or IP:port offers to open it directly.
     if (ipLike.test(query)) {
       const url = `http://${query}`;
@@ -159,7 +210,7 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
     const groupRank = new Map<string, number>();
     top.forEach((r, i) => !groupRank.has(r.kind) && groupRank.set(r.kind, i));
     return top.sort((a, b) => groupRank.get(a.kind)! - groupRank.get(b.kind)! || b.score - a.score);
-  }, [q, data?.services, actions, usageMap]);
+  }, [q, data?.services, devices, noteHits, actions, usageMap]);
 
   useEffect(() => setSel(0), [q]);
   useEffect(() => {
@@ -170,10 +221,22 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
     api.post("/api/spotlight/usage", { kind, ref }).then(() => qc.invalidateQueries({ queryKey: keys.usage })).catch(() => {});
   };
 
-  const activate = (r: Result | undefined, opts: { newTab?: boolean } = {}) => {
+  const activate = (r: Result | undefined, opts: { newTab?: boolean; docs?: boolean } = {}) => {
     if (!r) return;
     onClose();
-    if (r.kind === "link") {
+    if (opts.docs && r.kind === "service") {
+      record("service", String(r.service.id));
+      openDocs(r.service.id, r.service.name);
+      return;
+    }
+    if (r.kind === "note") {
+      navigate(`/docs/${r.noteId}`);
+      return;
+    }
+    if (r.kind === "device") {
+      record("device", r.ip);
+      navigate(`/network/ips/${r.ip}`);
+    } else if (r.kind === "link") {
       record("link", r.id.slice(1));
       window.open(r.url, "_blank", "noopener");
     } else if (r.kind === "service") {
@@ -197,7 +260,7 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
       setSel((s) => Math.max(s - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      activate(results[sel], e.shiftKey ? { newTab: true } : {});
+      activate(results[sel], e.metaKey || e.ctrlKey ? { docs: true } : e.shiftKey ? { newTab: true } : {});
     } else if (e.key === "Escape") {
       onClose();
     } else if (e.key === "Tab" && results[0] && q && results[0].title.toLowerCase().startsWith(q.toLowerCase())) {
@@ -229,7 +292,7 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Search services and actions…"
+              placeholder="Search services, notes, devices, actions…"
               className="relative w-full bg-transparent text-[22px] font-light text-fg outline-none placeholder:text-white/30"
               spellCheck={false}
               autoComplete="off"
@@ -255,7 +318,15 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
                       i === sel ? "bg-accent/90 text-white" : "text-fg hover:bg-white/5",
                     )}
                   >
-                    {r.kind === "service" || r.kind === "link" ? (
+                    {r.kind === "note" ? (
+                      <span className={clsx("flex size-8 shrink-0 items-center justify-center rounded-lg", i === sel ? "bg-white/20" : "bg-white/5")}>
+                        <FileText size={17} />
+                      </span>
+                    ) : r.kind === "device" ? (
+                      <span className={clsx("flex size-8 shrink-0 items-center justify-center rounded-lg", i === sel ? "bg-white/20" : "bg-white/5")}>
+                        <Network size={17} />
+                      </span>
+                    ) : r.kind === "service" || r.kind === "link" ? (
                       <ServiceIcon icon={r.service.icon} name={r.service.name} className="size-8 shrink-0" />
                     ) : (
                       <span className={clsx("flex size-8 shrink-0 items-center justify-center rounded-lg", i === sel ? "bg-white/20" : "bg-white/5")}>
@@ -286,6 +357,9 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
           </span>
           <span className="flex items-center gap-1">
             <span className="kbd">⇧↵</span> new tab
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="kbd">⌘↵</span> docs
           </span>
           <span className="flex items-center gap-1">
             <span className="kbd">tab</span> complete

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { api } from "./api";
-import type { Bucket, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User } from "./types";
+import type { Bucket, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User } from "./types";
 
 export const keys = {
   me: ["me"] as const,
@@ -15,6 +15,15 @@ export const keys = {
   pushover: ["pushover"] as const,
   hosts: ["hosts"] as const,
   subnets: ["subnets"] as const,
+  devices: ["devices"] as const,
+  scans: ["scans"] as const,
+  scanTargets: ["scan-targets"] as const,
+  notes: ["notes"] as const,
+  folders: ["folders"] as const,
+  tags: ["tags"] as const,
+  npm: ["npm-status"] as const,
+  proxmox: ["proxmox"] as const,
+  backups: ["backups"] as const,
 };
 
 export const useMe = () =>
@@ -117,6 +126,22 @@ export function useLiveEvents(enabled: boolean) {
             qc.invalidateQueries({ queryKey: keys.monitors });
             qc.invalidateQueries({ queryKey: keys.incidents });
             qc.invalidateQueries({ queryKey: keys.maintenance });
+          }
+          if (msg.type === "scan") qc.setQueryData<{ current: ScanStatus; recent: ScanRun[] }>(keys.scans, (prev) => (prev ? { ...prev, current: msg.data as ScanStatus } : prev));
+          if (msg.type === "scan" && !(msg.data as ScanStatus).running) {
+            qc.invalidateQueries({ queryKey: keys.scans });
+            qc.invalidateQueries({ queryKey: keys.scanTargets });
+          }
+          if (msg.type === "proxmox") qc.invalidateQueries({ queryKey: keys.proxmox });
+          if (msg.type === "notes") {
+            qc.invalidateQueries({ queryKey: keys.notes });
+            qc.invalidateQueries({ queryKey: keys.tags });
+            qc.invalidateQueries({ queryKey: keys.folders });
+          }
+          if (msg.type === "devices") {
+            qc.invalidateQueries({ queryKey: keys.devices });
+            qc.invalidateQueries({ queryKey: keys.subnets });
+            qc.invalidateQueries({ queryKey: ["subnet-map"] });
           }
           if (msg.type === "beat" && Date.now() - lastBeat.current > 10_000) {
             // Heartbeats are frequent; refresh the status table at most every 10s.
@@ -317,3 +342,128 @@ export function useDeletePortClaim() {
 
 export const checkIP = (ip: string, port?: number | null, excludeService?: number) =>
   api.get<IPCheck>(`/api/ips/check?ip=${encodeURIComponent(ip)}${port ? `&port=${port}` : ""}${excludeService ? `&excludeService=${excludeService}` : ""}`);
+
+// ── Scanning & devices ────────────────────────────────────────────────────
+
+export const useDevices = () => useQuery({ queryKey: keys.devices, queryFn: () => api.get<Device[]>("/api/devices"), refetchInterval: 120_000 });
+export const useScanTargets = () => useQuery({ queryKey: keys.scanTargets, queryFn: () => api.get<ScanTarget[]>("/api/scan-targets") });
+export const useScans = () => useQuery({ queryKey: keys.scans, queryFn: () => api.get<{ current: ScanStatus; recent: ScanRun[] }>("/api/scans"), refetchInterval: 30_000 });
+export const useDeviceEvents = (id: number) => useQuery({ queryKey: ["device-events", id], queryFn: () => api.get<DeviceEvent[]>(`/api/devices/${id}/events`) });
+
+export function useSaveScanTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: Omit<ScanTarget, "id" | "lastRunAt"> & { id?: number }) =>
+      id ? api.put<{ id: number }>(`/api/scan-targets/${id}`, body) : api.post<{ id: number }>("/api/scan-targets", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.scanTargets }),
+  });
+}
+
+export function useDeleteScanTarget() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: number) => api.del(`/api/scan-targets/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: keys.scanTargets }) });
+}
+
+export function useRunScan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.post<ScanStatus>(`/api/scan-targets/${id}/run`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.scans }),
+  });
+}
+
+export function useUpdateDevice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: number; acknowledged?: boolean; ignored?: boolean; notes?: string; hostId?: number | null; clearHost?: boolean }) =>
+      api.patch(`/api/devices/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.devices }),
+  });
+}
+
+export function useAcknowledgeAll() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: () => api.post("/api/devices/acknowledge-all"), onSuccess: () => qc.invalidateQueries({ queryKey: keys.devices }) });
+}
+
+export function useDeleteDevice() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: number) => api.del(`/api/devices/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: keys.devices }) });
+}
+
+// ── Docs ──────────────────────────────────────────────────────────────────
+
+export const useNotes = () => useQuery({ queryKey: keys.notes, queryFn: () => api.get<NoteSummary[]>("/api/notes") });
+export const useFolders = () => useQuery({ queryKey: keys.folders, queryFn: () => api.get<Folder[]>("/api/folders") });
+export const useTags = () => useQuery({ queryKey: keys.tags, queryFn: () => api.get<{ tag: string; count: number }[]>("/api/tags") });
+export const useNote = (id: number | null) =>
+  useQuery({ queryKey: ["note", id], queryFn: () => api.get<Note>(`/api/notes/${id}`), enabled: id != null, staleTime: Infinity, gcTime: 0 });
+export const useNoteVersions = (id: number, enabled: boolean) =>
+  useQuery({ queryKey: ["note-versions", id], queryFn: () => api.get<NoteVersion[]>(`/api/notes/${id}/versions`), enabled });
+export const searchNotes = (q: string) => api.get<NoteHit[]>(`/api/notes/search?q=${encodeURIComponent(q)}`);
+
+function useInvalidateNotes() {
+  const qc = useQueryClient();
+  return () => {
+    qc.invalidateQueries({ queryKey: keys.notes });
+    qc.invalidateQueries({ queryKey: keys.folders });
+    qc.invalidateQueries({ queryKey: keys.tags });
+  };
+}
+
+export function useCreateNote() {
+  const inv = useInvalidateNotes();
+  return useMutation({
+    mutationFn: (body: { title?: string; body?: string; folderId?: number | null; serviceId?: number | null; tags?: string[] }) => api.post<Note>("/api/notes", body),
+    onSuccess: inv,
+  });
+}
+
+export function useDeleteNote() {
+  const inv = useInvalidateNotes();
+  return useMutation({ mutationFn: (id: number) => api.del(`/api/notes/${id}`), onSuccess: inv });
+}
+
+export function useSaveFolder() {
+  const inv = useInvalidateNotes();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id?: number; name?: string; parentId?: number | null; clearParent?: boolean }) =>
+      id ? api.patch(`/api/folders/${id}`, body) : api.post<{ id: number }>("/api/folders", body),
+    onSuccess: inv,
+  });
+}
+
+export function useDeleteFolder() {
+  const inv = useInvalidateNotes();
+  return useMutation({ mutationFn: (id: number) => api.del(`/api/folders/${id}`), onSuccess: inv });
+}
+
+// ── Integrations, WoL, backups ────────────────────────────────────────────
+
+export const useNPMSettings = () => useQuery({ queryKey: ["npm-settings"], queryFn: () => api.get<NPMSettings>("/api/integrations/npm") });
+export const useNPMStatus = () => useQuery({ queryKey: keys.npm, queryFn: () => api.get<NPMStatus>("/api/npm/status"), refetchInterval: 60_000, staleTime: 20_000 });
+export const useProxmoxSettings = () => useQuery({ queryKey: ["proxmox-settings"], queryFn: () => api.get<ProxmoxSettings>("/api/integrations/proxmox") });
+export const useProxmox = () => useQuery({ queryKey: keys.proxmox, queryFn: () => api.get<ProxmoxSnapshot>("/api/proxmox/resources"), refetchInterval: 30_000 });
+export const useBackups = () => useQuery({ queryKey: keys.backups, queryFn: () => api.get<{ backups: StoredBackup[]; restorePending: boolean }>("/api/backups") });
+
+export function useSaveIntegration<T>(kind: "npm" | "proxmox") {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.put<T>(`/api/integrations/${kind}`, body),
+    onSuccess: (data) => {
+      qc.setQueryData([`${kind}-settings`], data);
+      qc.invalidateQueries({ queryKey: kind === "npm" ? keys.npm : keys.proxmox });
+    },
+  });
+}
+
+export function useCreateProxyHost() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ serviceId, ...body }: { serviceId: number; certificateId: number; sslForced: boolean; websockets: boolean }) =>
+      api.post<{ detail: string }>(`/api/services/${serviceId}/npm`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.npm }),
+  });
+}
+
+export const wakeOnLan = (mac: string, ip?: string) => api.post<{ ok: boolean; sentTo: string[] }>("/api/wol", { mac, ip });

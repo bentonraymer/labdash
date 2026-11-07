@@ -10,12 +10,17 @@ import { StatusDot } from "@/components/StatusDot";
 import { useUI } from "@/components/UIProvider";
 import { PageHeader } from "../AdminLayout";
 import { HostEditor } from "./HostEditor";
+import { PveStats, hostResource, usePve } from "@/components/IntegrationBits";
+import { WakeButton, useHostLinks } from "@/components/HostActions";
 
 /** Tree of physical hosts → VMs/LXCs → services running on each. */
 export function HostsPage() {
   const { data: hosts = [] } = useHosts();
   const { data: lp } = useLaunchpad();
   const ui = useUI();
+  const pve = usePve();
+  const linksFor = useHostLinks();
+  const hostById = useMemo(() => new Map(hosts.map((h) => [h.id, h])), [hosts]);
   const [editor, setEditor] = useState<{ open: boolean; host: Host | null; parentId?: number | null }>({ open: false, host: null });
 
   const { roots, children, servicesOn, unhosted } = useMemo(() => {
@@ -59,8 +64,20 @@ export function HostsPage() {
             </Link>
           )}
           {h.os && <span className="truncate text-xs text-faint">{h.os}</span>}
+          <span className="ml-auto flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            {(() => {
+              const r = hostResource(pve, h);
+              return r ? <PveStats r={r} compact={depth > 0} /> : null;
+            })()}
+            {linksFor(h, hostById).map((l) => (
+              <a key={l.label} href={l.url} target="_blank" rel="noopener noreferrer" className="btn-ghost px-1.5 py-1 text-[11px]" title={l.url}>
+                <l.icon size={12} /> {l.label}
+              </a>
+            ))}
+            <WakeButton mac={h.mac} ip={h.ip} compact />
+          </span>
           <button
-            className="btn-ghost ml-auto px-2 py-1 text-xs opacity-0 group-hover:opacity-100"
+            className="btn-ghost px-2 py-1 text-xs opacity-0 group-hover:opacity-100"
             onClick={(e) => {
               e.stopPropagation();
               setEditor({ open: true, host: null, parentId: h.id });
