@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { Send } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { usePushover, useSavePushover } from "@/lib/queries";
+import { useLaunchpad, usePatchSettings, usePushover, useSavePushover } from "@/lib/queries";
 
 /** Pushover keys (stored encrypted), device filter, link base URL and a test button. */
 export function PushoverCard() {
   const { data } = usePushover();
+  const { data: lp } = useLaunchpad();
+  const patch = usePatchSettings();
+  const st = lp?.settings;
   const save = useSavePushover();
   const [userKey, setUserKey] = useState("");
   const [appToken, setAppToken] = useState("");
@@ -97,6 +100,48 @@ export function PushoverCard() {
           Enabled
         </label>
       </div>
+      {st && (
+        <div className="grid gap-3 rounded-lg border border-line p-4">
+          <div className="text-xs font-semibold text-muted">Spam protection</div>
+          <div className={row}>
+            <div>
+              <div className="text-sm">Group alerts</div>
+              <div className="text-xs text-faint">Outages close together arrive as one message</div>
+            </div>
+            <select className="input max-w-sm" value={st.alert_group_seconds} onChange={(e) => patch.mutate({ alert_group_seconds: Number(e.target.value) })}>
+              <option value={0}>Off: send each alert immediately</option>
+              <option value={15}>Within 15 seconds</option>
+              <option value={30}>Within 30 seconds</option>
+              <option value={60}>Within 1 minute</option>
+              <option value={120}>Within 2 minutes</option>
+            </select>
+          </div>
+          <div className={row}>
+            <div>
+              <div className="text-sm">Hourly limit</div>
+              <div className="text-xs text-faint">Extra alerts are held back and counted</div>
+            </div>
+            <select className="input max-w-sm" value={st.alert_max_per_hour} onChange={(e) => patch.mutate({ alert_max_per_hour: Number(e.target.value) })}>
+              {[5, 10, 20, 50].map((n) => (
+                <option key={n} value={n}>
+                  At most {n} messages per hour
+                </option>
+              ))}
+              <option value={0}>Unlimited</option>
+            </select>
+          </div>
+          <div className={row}>
+            <div>
+              <div className="text-sm">Flapping protection</div>
+              <div className="text-xs text-faint">Mute a monitor that keeps going up and down</div>
+            </div>
+            <label className="flex items-center gap-2 text-sm text-muted">
+              <input type="checkbox" className="accent-accent" checked={st.alert_flap_protection} onChange={(e) => patch.mutate({ alert_flap_protection: e.target.checked })} />
+              After 3 down/up cycles in 30 min, send one notice and stay quiet until it's stable for 15 min
+            </label>
+          </div>
+        </div>
+      )}
       <div className="flex items-center gap-3">
         <button className="btn-primary" onClick={submit} disabled={save.isPending}>
           Save

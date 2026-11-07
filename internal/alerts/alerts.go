@@ -55,8 +55,10 @@ func Format(n monitor.Notification, baseURL string) pushover.Message {
 	switch n.Kind {
 	case "down":
 		m.Title = "🔴 " + name + " is down"
-		m.Body = fmt.Sprintf("<b>%s</b> failed its %s check.\n%s\n<font color=\"#888888\">%s</font>",
-			esc(name), strings.ToUpper(n.Monitor.Kind), esc(n.Message), esc(n.Monitor.Target))
+		m.Body = fmt.Sprintf("<b>%s</b> failed its %s check.\n%s", esc(name), strings.ToUpper(n.Monitor.Kind), esc(n.Message))
+		if n.Monitor.Target != "" {
+			m.Body += fmt.Sprintf("\n<font color=\"#888888\">%s</font>", esc(n.Monitor.Target))
+		}
 		m.Priority = n.Monitor.Priority
 	case "up":
 		m.Title = "🟢 " + name + " is back up"
@@ -89,16 +91,27 @@ func esc(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }
 
-// NewDevices alerts about devices seen for the first time, unless the
-// "new_device_alerts" setting is off or alerts are paused.
-func (p *Pushover) NewDevices(ctx context.Context, enabled func(context.Context) bool, devices []scanner.NewDevice) {
-	if len(devices) == 0 || (enabled != nil && !enabled(ctx)) {
-		return
-	}
+// SendMessage delivers a prepared message if Pushover is configured and enabled.
+func (p *Pushover) SendMessage(ctx context.Context, m pushover.Message) error {
 	sec, cfg, err := p.Load(ctx)
-	if err != nil {
-		return
+	if errors.Is(err, integrations.ErrNotConfigured) {
+		return nil
 	}
+	if err != nil {
+		return err
+	}
+	return p.Client.Send(ctx, sec, cfg, m)
+}
+
+// BaseURL is the LabDash URL configured for alert links ("" if unset).
+func (p *Pushover) BaseURL(ctx context.Context) string {
+	var cfg pushover.Config
+	_, _ = p.Store.Get(ctx, "pushover", &cfg, nil)
+	return cfg.BaseURL
+}
+
+// NewDevicesMessage builds the alert for devices seen for the first time.
+func NewDevicesMessage(devices []scanner.NewDevice, baseURL string) pushover.Message {
 	var b strings.Builder
 	for i, d := range devices {
 		if i == 8 {
@@ -123,9 +136,9 @@ func (p *Pushover) NewDevices(ctx context.Context, enabled func(context.Context)
 		title = fmt.Sprintf("🆕 %d new devices on your network", len(devices))
 	}
 	m := pushover.Message{Title: title, Body: strings.TrimSpace(b.String()), HTML: true}
-	if cfg.BaseURL != "" {
-		m.URL = strings.TrimRight(cfg.BaseURL, "/") + "/network/devices"
+	if baseURL != "" {
+		m.URL = strings.TrimRight(baseURL, "/") + "/network/devices"
 		m.URLTitle = "Review in LabDash"
 	}
-	_ = p.Client.Send(ctx, sec, cfg, m)
+	return m
 }

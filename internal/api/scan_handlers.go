@@ -187,6 +187,8 @@ type Device struct {
 	MAC          string       `json:"mac"`
 	IP           string       `json:"ip"`
 	Hostname     string       `json:"hostname"`
+	CustomName   string       `json:"customName"`
+	RouterName   string       `json:"routerName"`
 	Vendor       string       `json:"vendor"`
 	OSName       string       `json:"osName"`
 	OSFamily     string       `json:"osFamily"`
@@ -205,7 +207,7 @@ type Device struct {
 func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	rows, err := s.DB.QueryContext(ctx, `
-		SELECT d.id, d.mac, d.ip, d.hostname, d.vendor, d.os_name, d.os_family, d.device_type, d.is_up, d.acknowledged,
+		SELECT d.id, d.mac, d.ip, d.hostname, d.custom_name, d.router_name, d.vendor, d.os_name, d.os_family, d.device_type, d.is_up, d.acknowledged,
 		       d.ignored, d.notes, d.first_seen, d.last_seen, d.host_id, COALESCE(h.name, '')
 		FROM devices d LEFT JOIN hosts h ON h.id = d.host_id`)
 	if err != nil {
@@ -218,7 +220,7 @@ func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {
 		var d Device
 		var hid sql.NullInt64
 		var hname string
-		if err := rows.Scan(&d.ID, &d.MAC, &d.IP, &d.Hostname, &d.Vendor, &d.OSName, &d.OSFamily, &d.DeviceType, &d.IsUp, &d.Acknowledged,
+		if err := rows.Scan(&d.ID, &d.MAC, &d.IP, &d.Hostname, &d.CustomName, &d.RouterName, &d.Vendor, &d.OSName, &d.OSFamily, &d.DeviceType, &d.IsUp, &d.Acknowledged,
 			&d.Ignored, &d.Notes, &d.FirstSeen, &d.LastSeen, &hid, &hname); err != nil {
 			rows.Close()
 			serverErr(w, err)
@@ -285,6 +287,7 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 		Acknowledged *bool   `json:"acknowledged"`
 		Ignored      *bool   `json:"ignored"`
 		Notes        *string `json:"notes"`
+		CustomName   *string `json:"customName"`
 		HostID       *int64  `json:"hostId"`
 		ClearHost    bool    `json:"clearHost"`
 	}
@@ -292,9 +295,14 @@ func (s *Server) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if in.CustomName != nil && len(*in.CustomName) > 80 {
+		writeErr(w, http.StatusBadRequest, "name is too long (max 80)")
+		return
+	}
 	_, err = s.DB.ExecContext(r.Context(), `UPDATE devices SET acknowledged = COALESCE(?, acknowledged), ignored = COALESCE(?, ignored),
-		notes = COALESCE(?, notes), host_id = CASE WHEN ? THEN NULL ELSE COALESCE(?, host_id) END WHERE id = ?`,
-		in.Acknowledged, in.Ignored, in.Notes, in.ClearHost, in.HostID, id)
+		notes = COALESCE(?, notes), custom_name = COALESCE(?, custom_name),
+		host_id = CASE WHEN ? THEN NULL ELSE COALESCE(?, host_id) END WHERE id = ?`,
+		in.Acknowledged, in.Ignored, in.Notes, trimPtr(in.CustomName), in.ClearHost, in.HostID, id)
 	if err != nil {
 		serverErr(w, err)
 		return

@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import clsx from "clsx";
 import { ArrowDown, ArrowUp, BellRing, Check, ChevronRight, EyeOff, Play, Radar, Settings2, Trash2 } from "lucide-react";
@@ -13,6 +13,9 @@ import { ScanTargetsEditor } from "./ScanTargetsEditor";
 
 type SortKey = "ip" | "hostname" | "os" | "type" | "vendor" | "ports" | "firstSeen" | "lastSeen";
 type Show = "up" | "all" | "new" | "ignored";
+
+/** Display name: your name for it, else the router's, else DNS. */
+export const deviceName = (d: Device) => d.customName || d.routerName || d.hostname;
 
 const ipKey = (ip: string) => ip.split(".").map((p) => p.padStart(3, "0")).join(".");
 
@@ -56,6 +59,8 @@ export function DevicesPage() {
           return d.firstSeen;
         case "lastSeen":
           return d.lastSeen;
+        case "hostname":
+          return (deviceName(d) || "~").toLowerCase();
         default:
           return (d[sort.key] || "~").toLowerCase();
       }
@@ -68,7 +73,7 @@ export function DevicesPage() {
       .filter(
         (d) =>
           !term ||
-          [d.ip, d.mac, d.hostname, d.vendor, d.osName, d.deviceType, d.host?.name ?? "", ...d.services.map((s) => s.name), ...d.ports.map((p) => `${p.port} ${p.product} ${p.title}`)].some((v) =>
+          [d.ip, d.mac, d.hostname, d.customName, d.routerName, d.vendor, d.osName, d.deviceType, d.host?.name ?? "", ...d.services.map((s) => s.name), ...d.ports.map((p) => `${p.port} ${p.product} ${p.title}`)].some((v) =>
             v.toLowerCase().includes(term),
           ),
       )
@@ -181,7 +186,7 @@ export function DevicesPage() {
                 <th className="w-6" />
                 <Th k="ip">Address</Th>
                 <th className="px-3 py-2 text-left font-medium">Web</th>
-                <Th k="hostname">Hostname</Th>
+                <Th k="hostname">Name</Th>
                 <Th k="os">OS</Th>
                 <Th k="type">Type</Th>
                 <Th k="vendor">Vendor</Th>
@@ -244,7 +249,10 @@ function DeviceRow({ device: d, open, onToggle }: { device: Device; open: boolea
           ))}
         </div>
       </td>
-      <td className="max-w-[200px] truncate px-3 py-2">{d.hostname || <span className="text-faint">—</span>}</td>
+      <td className="max-w-[220px] px-3 py-2">
+        <div className={clsx("truncate", d.customName && "font-medium")}>{deviceName(d) || <span className="text-faint">—</span>}</div>
+        {deviceName(d) !== d.hostname && d.hostname && <div className="truncate text-[10px] text-faint">{d.hostname}</div>}
+      </td>
       <td className="px-3 py-2">
         <div className="flex max-w-[220px] items-center gap-2">
           {os && <ServiceIcon icon={os} name="" className="size-4 shrink-0" />}
@@ -354,6 +362,7 @@ function DeviceDetail({ device: d }: { device: Device }) {
         </div>
       </div>
       <div className="grid content-start gap-3">
+        <NameField device={d} />
         <div className="text-xs text-muted">
           First seen <b className="text-fg">{fmtDateTime(d.firstSeen)}</b>
           <br />
@@ -392,6 +401,32 @@ function DeviceDetail({ device: d }: { device: Device }) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Custom name, saved per MAC (or per IP for devices without one). */
+function NameField({ device: d }: { device: Device }) {
+  const update = useUpdateDevice();
+  const [v, setV] = useState(d.customName);
+  useEffect(() => setV(d.customName), [d.customName]);
+  const save = () => v.trim() !== d.customName && update.mutate({ id: d.id, customName: v.trim(), acknowledged: true });
+  return (
+    <div>
+      <label className="label">Name</label>
+      <input
+        className="input py-1.5"
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+        placeholder={d.routerName || d.hostname || "e.g. Living room TV"}
+        maxLength={80}
+      />
+      <p className="mt-1 text-[11px] text-faint">
+        {d.mac ? `Stays with ${d.mac} if its IP changes.` : "No MAC known (different subnet), so the name follows this IP."}
+        {d.routerName && ` Router calls it “${d.routerName}”.`}
+      </p>
     </div>
   );
 }

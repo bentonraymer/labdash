@@ -20,6 +20,7 @@ import (
 	"github.com/bentonraymer/labdash/internal/config"
 	"github.com/bentonraymer/labdash/internal/db"
 	"github.com/bentonraymer/labdash/internal/events"
+	"github.com/bentonraymer/labdash/internal/glinet"
 	"github.com/bentonraymer/labdash/internal/icons"
 	"github.com/bentonraymer/labdash/internal/integrations"
 	"github.com/bentonraymer/labdash/internal/monitor"
@@ -85,12 +86,21 @@ func run() error {
 	store := &integrations.Store{DB: database, Box: box}
 	po := pushover.New()
 	pushAlerts := &alerts.Pushover{Store: store, Client: po}
-	engine := monitor.NewEngine(database, hub, pushAlerts)
+	// All alerts go through the dispatcher: grouping, hourly cap, flap muting.
+	dispatcher := alerts.NewDispatcher(pushAlerts.SendMessage, func(ctx context.Context) alerts.Policy {
+		return alerts.Policy{
+			Window:         time.Duration(settingNumber(ctx, database, "alert_group_seconds", 30)) * time.Second,
+			MaxPerHour:     int(settingNumber(ctx, database, "alert_max_per_hour", 20)),
+			FlapProtection: settingOn(ctx, database, "alert_flap_protection", true),
+			BaseURL:        pushAlerts.BaseURL(ctx),
+		}
+	})
+	engine := monitor.NewEngine(database, hub, dispatcher)
 	iconCache := icons.New(cfg.DataDir + "/icons")
 	scan := scanner.NewService(database, hub, iconCache, func(ctx context.Context, devs []scanner.NewDevice) {
-		pushAlerts.NewDevices(ctx, func(ctx context.Context) bool {
-			return settingOn(ctx, database, "new_device_alerts", true) && !settingOn(ctx, database, "alerts_paused", false)
-		}, devs)
+		if settingOn(ctx, database, "new_device_alerts", true) && !settingOn(ctx, database, "alerts_paused", false) {
+			dispatcher.SendDirect(ctx, alerts.NewDevicesMessage(devs, pushAlerts.BaseURL(ctx)))
+		}
 	})
 	srv := &api.Server{
 		DB:           database,
@@ -102,6 +112,7 @@ func run() error {
 		Pushover:     po,
 		Scanner:      scan,
 		NPM:          npm.New(),
+		GLiNet:       glinet.New(),
 		Secrets:      box,
 		Icons:        iconCache,
 		Web:          dist,
@@ -116,9 +127,11 @@ func run() error {
 		stop()
 	}
 	go srv.Proxmox.Run(ctx)
+	go srv.RunRouterPoller(ctx)
 	go nightlyBackups(ctx, database, cfg.DataDir)
 
 	go engine.Run(ctx)
+	go dispatcher.Run(ctx)
 	go scan.Run(ctx)
 
 	// Background housekeeping.
@@ -196,4 +209,17 @@ func nightlyBackups(ctx context.Context, db *sql.DB, dataDir string) {
 			slog.Info("nightly backup written", "file", name)
 		}
 	}
+}
+
+// settingNumber reads a numeric setting, falling back to def when unset.
+func settingNumber(ctx context.Context, db *sql.DB, key string, def float64) float64 {
+	var raw string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&raw); err != nil {
+		return def
+	}
+	var v float64
+	if _, err := fmt.Sscanf(raw, "%g", &v); err != nil {
+		return def
+	}
+	return v
 }

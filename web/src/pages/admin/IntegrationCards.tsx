@@ -1,8 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { PlugZap } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { useNPMSettings, useProxmoxSettings, useSaveIntegration } from "@/lib/queries";
-import type { NPMSettings, ProxmoxSettings } from "@/lib/types";
+import { useNPMSettings, useProxmoxSettings, useRouterSettings, useSaveIntegration } from "@/lib/queries";
+import type { NPMSettings, ProxmoxSettings, RouterSettings } from "@/lib/types";
 
 const row = "grid grid-cols-[220px_1fr] items-center gap-4";
 
@@ -172,6 +172,79 @@ export function ProxmoxCard() {
       </Field>
       <div className="flex items-center gap-3">
         <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate({ url, tokenId, tokenSecret: secret, verifyTls, enabled }, { onSuccess: () => setSecret("") })}>
+          Save
+        </button>
+        <button className="btn-outline" disabled={testing || !data?.configured} onClick={test}>
+          <PlugZap size={14} /> {testing ? "Testing…" : "Test connection"}
+        </button>
+        {save.error && <span className="text-sm text-down">{save.error.message}</span>}
+        <TestResult result={result} />
+      </div>
+    </div>
+  );
+}
+
+/** GL.iNet router (firmware 4.x) for DHCP reservations and client names. */
+export function GLiNetCard() {
+  const { data } = useRouterSettings();
+  const save = useSaveIntegration<RouterSettings>("glinet");
+  const [url, setUrl] = useState("");
+  const [username, setUsername] = useState("root");
+  const [password, setPassword] = useState("");
+  const [enabled, setEnabled] = useState(true);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  useEffect(() => {
+    if (!data) return;
+    setUrl(data.url);
+    setUsername(data.username || "root");
+    setEnabled(data.configured ? data.enabled : true);
+  }, [data]);
+
+  const test = async () => {
+    setTesting(true);
+    setResult(null);
+    try {
+      const r = await api.post<{ reservations: number; clients: number }>("/api/integrations/glinet/test");
+      setResult({ ok: true, text: `Connected: ${r.reservations} reservations, ${r.clients} clients` });
+    } catch (e) {
+      setResult({ ok: false, text: e instanceof ApiError ? e.message : "Failed" });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-4">
+      <p className="text-xs text-muted">
+        Reads the reserved addresses from the router's LAN page and its client list (names, online status), and can add new reservations from the Add Service wizard or the port
+        view. Removing reservations isn't possible through the router's API, so do that in the router UI.
+      </p>
+      <Field label="Router URL">
+        <input className="input max-w-sm font-mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://192.168.8.1" />
+      </Field>
+      <Field label="Username">
+        <input className="input max-w-sm" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" />
+      </Field>
+      <Field label="Admin password" hint="Stored encrypted">
+        <input
+          className="input max-w-sm"
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder={data?.hasPassword ? "saved — leave blank to keep" : ""}
+        />
+      </Field>
+      <Field label="Options">
+        <label className="flex items-center gap-2 text-sm text-muted">
+          <input type="checkbox" className="accent-accent" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+          Enabled
+        </label>
+      </Field>
+      <div className="flex items-center gap-3">
+        <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate({ url, username, password, enabled }, { onSuccess: () => setPassword("") })}>
           Save
         </button>
         <button className="btn-outline" disabled={testing || !data?.configured} onClick={test}>

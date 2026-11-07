@@ -190,7 +190,7 @@ export function ServicesPage() {
                   </div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-muted">{s.hosting?.nodeName || "—"}</td>
-                <td className="px-3 py-2 whitespace-nowrap">{s.hosting?.hostName && s.hosting.hostName !== s.hosting.nodeName ? s.hosting.hostName : <span className="text-faint">—</span>}</td>
+                <td className="px-3 py-2 whitespace-nowrap">{s.hosting?.hostName && (s.hosting.hostName !== s.hosting.nodeName || s.hosting.runtime === "bare_metal") ? s.hosting.hostName : <span className="text-faint">—</span>}</td>
                 <td className="px-3 py-2">
                   {s.hosting ? (
                     <span className={clsx("rounded px-1.5 py-0.5 text-[11px] font-medium", runtimeTone[s.hosting.runtime])}>{runtimeLabel[s.hosting.runtime]}</span>
@@ -216,7 +216,7 @@ export function ServicesPage() {
                   </td>
                 )}
                 <td className="px-3 py-2">{(() => { const g = guestOf(s); return g ? <PveStats r={g} compact /> : <span className="text-faint">—</span>; })()}</td>
-                <td className="px-3 py-2 whitespace-nowrap text-muted">{sectionName.get(s.sectionId ?? -1) ?? "—"}</td>
+                <td className="px-3 py-2 whitespace-nowrap text-muted">{sectionName.get(s.sectionId ?? -1) ?? <span className="text-faint italic">hidden</span>}</td>
                 <td className="px-3 py-2">
                   {s.url && (
                     <a href={s.url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-faint hover:text-accent" title={s.url}>

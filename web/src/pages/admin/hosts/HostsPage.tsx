@@ -46,7 +46,9 @@ export function HostsPage() {
   const renderHost = (h: Host, depth: number) => {
     const Icon = hostKindIcon[h.kind];
     const kids = children.get(h.id) ?? [];
-    const svcs = servicesOn.get(h.id) ?? [];
+    const all = servicesOn.get(h.id) ?? [];
+    const svcs = all.filter((s) => s.hosting?.runtime !== "bare_metal");
+    const itself = all.filter((s) => s.hosting?.runtime === "bare_metal");
     return (
       <div key={h.id}>
         <div
@@ -63,6 +65,21 @@ export function HostsPage() {
               {h.ip}
             </Link>
           )}
+          {itself.map((s) => (
+            <button
+              key={s.id}
+              title={`${s.name} runs on this machine itself`}
+              onClick={(e) => {
+                e.stopPropagation();
+                ui.editService(s);
+              }}
+              className="flex items-center gap-1.5 rounded bg-white/5 px-1.5 py-0.5 text-[11px] hover:bg-white/10"
+            >
+              <StatusDot status={s.status} className="size-1.5" />
+              <ServiceIcon icon={s.icon} name={s.name} className="size-3.5" />
+              {s.name}
+            </button>
+          ))}
           {h.os && <span className="truncate text-xs text-faint">{h.os}</span>}
           <span className="ml-auto flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
             {(() => {

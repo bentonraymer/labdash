@@ -22,6 +22,7 @@ type Config struct {
 	HostID      *int64
 	Name        string
 	ServiceName string
+	HostName    string
 	Kind        string
 	Target      string
 	Derived     bool // target came from the service, not an explicit override
@@ -207,12 +208,13 @@ func (e *Engine) load(ctx context.Context) error {
 // LoadConfigs reads monitors (filtered by where) with targets resolved for mode.
 func LoadConfigs(ctx context.Context, db *sql.DB, mode, where string, args ...any) ([]Config, error) {
 	rows, err := db.QueryContext(ctx, `
-		SELECT m.id, m.service_id, d.host_id, m.name, COALESCE(s.name, ''), m.kind, m.target, m.interval_s, m.timeout_s,
+		SELECT m.id, m.service_id, d.host_id, m.name, COALESCE(s.name, ''), COALESCE(h.name, ''), m.kind, m.target, m.interval_s, m.timeout_s,
 		       m.retries, m.expected_status, m.keyword, m.ignore_tls, m.muted, m.pushover_priority, m.pushover_sound,
 		       COALESCE(s.dns_url, ''), COALESCE(s.direct_scheme, 'http'), COALESCE(s.direct_ip, ''), s.direct_port, COALESCE(s.direct_path, '')
 		FROM monitors m
 		LEFT JOIN services s ON s.id = m.service_id
 		LEFT JOIN deployments d ON d.service_id = m.service_id
+		LEFT JOIN hosts h ON h.id = d.host_id
 		WHERE `+where, args...)
 	if err != nil {
 		return nil, err
@@ -224,7 +226,7 @@ func LoadConfigs(ctx context.Context, db *sql.DB, mode, where string, args ...an
 		var svcID, hostID, port sql.NullInt64
 		var interval, timeout int
 		var t urls.Target
-		if err := rows.Scan(&c.ID, &svcID, &hostID, &c.Name, &c.ServiceName, &c.Kind, &c.Target, &interval, &timeout,
+		if err := rows.Scan(&c.ID, &svcID, &hostID, &c.Name, &c.ServiceName, &c.HostName, &c.Kind, &c.Target, &interval, &timeout,
 			&c.Retries, &c.Expected, &c.Keyword, &c.IgnoreTLS, &c.Muted, &c.Priority, &c.Sound,
 			&t.DNSURL, &t.DirectScheme, &t.DirectIP, &port, &t.DirectPath); err != nil {
 			return nil, err

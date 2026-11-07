@@ -37,6 +37,20 @@ export function LaunchpadPage() {
   const [editing, setEditing] = useState(false);
   const ui = useUI();
 
+  // Space bar jumps to search on the dashboard (like Spotlight).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== " " || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(t.tagName))) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      e.preventDefault();
+      ui.openSpotlight();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ui]);
+
   if (isLoading || !data) return <Backdrop settings={undefined} />;
   const { sections, services, settings } = data;
 
@@ -275,7 +289,7 @@ function Board({ sections, services, editing, glow }: { sections: Section[]; ser
     <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={onDragStart} onDragOver={onDragOver} onDragEnd={onDragEnd} onDragCancel={() => setActiveId(null)}>
       <div className="grid grid-cols-1 items-start gap-x-10 gap-y-8 md:grid-cols-2 2xl:grid-cols-3">
         {order.map((id) => renderSection(`s${id}`, sectionById.get(id) ?? null))}
-        {renderSection(NONE, null)}
+        {/* Services without a section exist (Services table, Spotlight) but aren't shown here. */}
         {editing && (
           <button
             onClick={() => ui.editSection(null)}
@@ -285,6 +299,23 @@ function Board({ sections, services, editing, glow }: { sections: Section[]; ser
           </button>
         )}
       </div>
+      {editing && (containers[NONE]?.length ?? 0) > 0 && (
+        <div className="glass mt-8 rounded-xl p-4">
+          <div className="mb-2 text-xs font-semibold tracking-wide text-white/60 uppercase">Not on the dashboard ({containers[NONE].length})</div>
+          <p className="mb-3 text-xs text-white/45">These services have no section, so they only appear in Spotlight and the Services table. Click one to give it a section.</p>
+          <div className="flex flex-wrap gap-2">
+            {containers[NONE].map((id) => {
+              const s = byId.get(id);
+              return s ? (
+                <button key={id} onClick={() => ui.editService(s)} className="flex items-center gap-2 rounded-lg bg-white/5 px-2.5 py-1.5 text-xs text-white/80 hover:bg-white/10">
+                  <ServiceIcon icon={s.icon} name={s.name} className="size-4" />
+                  {s.name}
+                </button>
+              ) : null;
+            })}
+          </div>
+        </div>
+      )}
       <DragOverlay dropAnimation={{ duration: 160, easing: "ease-out" }}>
         {active ? <TileFace service={active} size={activeSize} glow={glow} lifted /> : null}
       </DragOverlay>

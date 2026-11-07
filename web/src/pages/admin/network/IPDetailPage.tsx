@@ -7,6 +7,7 @@ import { useDeletePortClaim, useIPDetail, useLaunchpad, useSavePortClaim } from 
 import { ServiceIcon } from "@/components/ServiceIcon";
 import { PageHeader } from "../AdminLayout";
 import { WakeButton } from "@/components/HostActions";
+import { RouterReserve } from "@/components/RouterBits";
 import { cellStyle, stateLabel } from "./ipStyles";
 
 const sourceLabel = { service: "Service", claim: "Claimed", scan: "Scan only" } as const;
@@ -135,6 +136,7 @@ export function IPDetailPage() {
         </div>
 
         <aside className="grid content-start gap-4">
+          <RouterReserve ip={ip} defaultName={data.owners.find((o) => o.kind === "service" || o.kind === "host")?.label} />
           <form onSubmit={addClaim} className="grid gap-2 rounded-lg border border-line bg-panel p-4">
             <h2 className="text-sm font-semibold">Claim a port</h2>
             <div className="grid grid-cols-[1fr_80px] gap-2">

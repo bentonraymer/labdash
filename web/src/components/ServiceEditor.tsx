@@ -4,7 +4,7 @@ import { useOpenServiceDocs } from "@/lib/serviceDocs";
 import { Modal } from "./Modal";
 import { ServiceIcon } from "./ServiceIcon";
 import { IconPicker } from "./IconPicker";
-import { useDeleteService, useLaunchpad, useSaveDeployment, useSaveMonitor, useSaveService } from "@/lib/queries";
+import { useDeleteService, useHosts, useLaunchpad, useSaveDeployment, useSaveMonitor, useSaveService } from "@/lib/queries";
 import { NPMPanel } from "./NPMPanel";
 import { HostingFields, hostingFromService, hostingToInput, type HostingForm } from "./HostingFields";
 import { slugifyIconName } from "@/lib/icons";
@@ -78,6 +78,15 @@ export function ServiceEditor({
   const saveMonitor = useSaveMonitor();
   const saveDeployment = useSaveDeployment();
   const openDocs = useOpenServiceDocs();
+  const { data: hosts = [] } = useHosts();
+  // Bare metal on a host = the service *is* that host: take its IP.
+  const onHosting = (h: HostingForm) => {
+    setHosting(h);
+    if (h.runtime === "bare_metal" && h.hostId) {
+      const host = hosts.find((x) => String(x.id) === h.hostId);
+      if (host?.ip) setF((p) => (p.directIp ? p : { ...p, directIp: host.ip }));
+    }
+  };
   const [hosting, setHosting] = useState<HostingForm>(hostingFromService(null));
   const domain = data?.settings.dns_domain || "";
 
@@ -206,7 +215,7 @@ export function ServiceEditor({
             <div>
               <label className="label">Section</label>
               <select className="input" value={f.sectionId} onChange={(e) => set("sectionId", e.target.value)}>
-                <option value="">— None —</option>
+                <option value="">— Not on dashboard —</option>
                 {data?.sections.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -280,7 +289,7 @@ export function ServiceEditor({
 
         <fieldset className="rounded-lg border border-line p-4">
           <legend className="px-1 text-xs font-semibold text-muted">Hosting</legend>
-          <HostingFields value={hosting} onChange={setHosting} />
+          <HostingFields value={hosting} onChange={onHosting} />
         </fieldset>
 
         <div>

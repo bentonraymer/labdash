@@ -17,7 +17,7 @@ const elk = new ELK();
 const W = { host: 200, service: 180 };
 const H = { host: 64, service: 48 };
 
-type HostData = { host: Host; usage?: ReactNode };
+type HostData = { host: Host; usage?: ReactNode; itself?: Service[] };
 type ServiceData = { service: Service };
 
 function HostNode({ data }: NodeProps<Node<HostData>>) {
@@ -36,6 +36,13 @@ function HostNode({ data }: NodeProps<Node<HostData>>) {
         <span>{hostKindLabel[h.kind]}</span>
         {h.ip && <span className="font-mono">{h.ip}</span>}
       </div>
+      {data.itself?.map((s) => (
+        <div key={s.id} className="mt-1.5 flex items-center gap-1.5 rounded bg-white/5 px-1.5 py-1 text-[11px]">
+          <ServiceIcon icon={s.icon} name={s.name} className="size-4" />
+          <span className="flex-1 truncate">{s.name}</span>
+          <StatusDot status={s.status} className="size-2" />
+        </div>
+      ))}
       {data.usage && <div className="mt-1.5">{data.usage}</div>}
       <Handle type="source" position={Position.Bottom} className="!border-0 !bg-line-2" />
     </div>
@@ -82,9 +89,12 @@ export function TopologyPage() {
   const [edges, setEdges] = useState<Edge[]>([]);
 
   const services = useMemo(() => lp?.services ?? [], [lp?.services]);
-  const hosted = services.filter((s) => s.hosting?.hostId && hosts.some((h) => h.id === s.hosting!.hostId));
+  const placed = services.filter((s) => s.hosting?.hostId && hosts.some((h) => h.id === s.hosting!.hostId));
+  // Bare-metal services are the host itself: drawn inside the host's card.
+  const hosted = placed.filter((s) => s.hosting!.runtime !== "bare_metal");
+  const itselfOf = (hostId: number) => placed.filter((s) => s.hosting!.runtime === "bare_metal" && s.hosting!.hostId === hostId);
   // Re-layout only when structure changes, not on every status/stat refresh.
-  const shapeKey = JSON.stringify([hosts.map((h) => [h.id, h.parentId]), hosted.map((s) => [s.id, s.hosting?.hostId])]);
+  const shapeKey = JSON.stringify([hosts.map((h) => [h.id, h.parentId, itselfOf(h.id).length]), hosted.map((s) => [s.id, s.hosting?.hostId])]);
 
   useEffect(() => {
     if (!hosts.length) {
@@ -107,7 +117,7 @@ export function TopologyPage() {
         "elk.separateConnectedComponents": "false",
       },
       children: [
-        ...hosts.map((h) => ({ id: `h${h.id}`, width: W.host, height: H.host + (pve ? 22 : 0) })),
+        ...hosts.map((h) => ({ id: `h${h.id}`, width: W.host, height: H.host + (pve ? 22 : 0) + itselfOf(h.id).length * 30 })),
         ...hosted.map((s) => ({ id: `s${s.id}`, width: W.service, height: H.service })),
       ],
       edges: [
@@ -147,7 +157,7 @@ export function TopologyPage() {
           const h = hosts.find((x) => `h${x.id}` === n.id);
           if (!h) return n;
           const r = hostResource(pve, h);
-          return { ...n, data: { host: h, usage: r ? <PveStats r={r} compact /> : undefined } };
+          return { ...n, data: { host: h, itself: itselfOf(h.id), usage: r ? <PveStats r={r} compact /> : undefined } };
         }
         const s = services.find((x) => `s${x.id}` === n.id);
         return s ? { ...n, data: { service: s } } : n;
@@ -155,12 +165,12 @@ export function TopologyPage() {
     [nodes, hosts, services, pve],
   );
 
-  const unhosted = services.length - hosted.length;
+  const unhosted = services.length - placed.length;
   return (
     <div className="flex h-full flex-col">
       <PageHeader
         title="Topology"
-        subtitle={`${hosts.length} hosts · ${hosted.length} services placed${unhosted ? ` · ${unhosted} without a host` : ""} · click a node to edit it`}
+        subtitle={`${hosts.length} hosts · ${placed.length} services placed${unhosted ? ` · ${unhosted} without a host` : ""} · click a node to edit it`}
       />
       <div className="relative min-h-0 flex-1">
         {hosts.length === 0 ? (

@@ -8,6 +8,7 @@ export const cellStyle: Record<CellState, string> = {
   gateway: "bg-white/85 text-bg font-semibold",
   static: "bg-accent text-white",
   service: "bg-accent-2 text-white",
+  lease: "bg-sky-500/70 text-white",
   reserved: "bg-[repeating-linear-gradient(135deg,rgba(255,255,255,0.14)_0_3px,transparent_3px_7px)] border border-white/25 text-fg",
   dhcp: "bg-teal-500/20 text-teal-200",
   discovered: "bg-warn text-bg font-semibold",
@@ -21,6 +22,7 @@ export const stateLabel: Record<CellState, string> = {
   gateway: "Gateway",
   static: "Static / host",
   service: "Service",
+  lease: "Router reservation",
   reserved: "Reserved",
   dhcp: "DHCP",
   discovered: "Seen, unclaimed",
@@ -28,4 +30,4 @@ export const stateLabel: Record<CellState, string> = {
   unmanaged: "Not in a subnet",
 };
 
-export const legendOrder: CellState[] = ["gateway", "static", "service", "reserved", "dhcp", "discovered", "free"];
+export const legendOrder: CellState[] = ["gateway", "static", "service", "lease", "reserved", "dhcp", "discovered", "free"];

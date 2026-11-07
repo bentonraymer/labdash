@@ -29,6 +29,7 @@ export function HostingFields({ value: f, onChange }: { value: HostingForm; onCh
   const { data: hosts = [] } = useHosts();
   const set = <K extends keyof HostingForm>(k: K, v: HostingForm[K]) => onChange({ ...f, [k]: v });
   const guest = f.runtime === "vm" || f.runtime === "lxc";
+  const bare = f.runtime === "bare_metal";
   // VMs/LXCs run on a Proxmox node; Docker runs on any host (often a VM).
   const hostChoices = guest ? hosts.filter((h) => h.kind === "proxmox_node" || h.kind === "server") : hosts;
 
@@ -56,7 +57,7 @@ export function HostingFields({ value: f, onChange }: { value: HostingForm; onCh
       {f.runtime && (
         <div className="grid grid-cols-[1fr_120px_1fr] gap-3">
           <div>
-            <label className="label">{guest ? "Proxmox node" : "Runs on host"}</label>
+            <label className="label">{guest ? "Proxmox node" : bare ? "Which machine" : "Runs on host"}</label>
             <select className="input" value={f.hostId} onChange={(e) => set("hostId", e.target.value)}>
               <option value="">— Choose —</option>
               {hostChoices.map((h) => (
@@ -67,6 +68,7 @@ export function HostingFields({ value: f, onChange }: { value: HostingForm; onCh
               ))}
             </select>
             {hosts.length === 0 && <p className="mt-1 text-[11px] text-faint">Add hosts on the Hosts page first.</p>}
+            {bare && f.hostId && <p className="mt-1 text-[11px] text-faint">This service is the machine itself (e.g. the TrueNAS web UI on the NAS). It uses the host's IP.</p>}
           </div>
           <div>
             <label className="label">VMID</label>

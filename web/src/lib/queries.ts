@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { api } from "./api";
-import type { Bucket, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User } from "./types";
+import type { Bucket, RouterSettings, RouterSnapshot, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User } from "./types";
 
 export const keys = {
   me: ["me"] as const,
@@ -375,7 +375,7 @@ export function useRunScan() {
 export function useUpdateDevice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...body }: { id: number; acknowledged?: boolean; ignored?: boolean; notes?: string; hostId?: number | null; clearHost?: boolean }) =>
+    mutationFn: ({ id, ...body }: { id: number; acknowledged?: boolean; ignored?: boolean; notes?: string; customName?: string; hostId?: number | null; clearHost?: boolean }) =>
       api.patch(`/api/devices/${id}`, body),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.devices }),
   });
@@ -446,13 +446,13 @@ export const useProxmoxSettings = () => useQuery({ queryKey: ["proxmox-settings"
 export const useProxmox = () => useQuery({ queryKey: keys.proxmox, queryFn: () => api.get<ProxmoxSnapshot>("/api/proxmox/resources"), refetchInterval: 30_000 });
 export const useBackups = () => useQuery({ queryKey: keys.backups, queryFn: () => api.get<{ backups: StoredBackup[]; restorePending: boolean }>("/api/backups") });
 
-export function useSaveIntegration<T>(kind: "npm" | "proxmox") {
+export function useSaveIntegration<T>(kind: "npm" | "proxmox" | "glinet") {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => api.put<T>(`/api/integrations/${kind}`, body),
     onSuccess: (data) => {
       qc.setQueryData([`${kind}-settings`], data);
-      qc.invalidateQueries({ queryKey: kind === "npm" ? keys.npm : keys.proxmox });
+      qc.invalidateQueries({ queryKey: kind === "npm" ? keys.npm : kind === "proxmox" ? keys.proxmox : ["router"] });
     },
   });
 }
@@ -467,3 +467,21 @@ export function useCreateProxyHost() {
 }
 
 export const wakeOnLan = (mac: string, ip?: string) => api.post<{ ok: boolean; sentTo: string[] }>("/api/wol", { mac, ip });
+
+// ── GL.iNet router ────────────────────────────────────────────────────────
+
+export const useRouterSettings = () =>
+  useQuery({ queryKey: ["glinet-settings"], queryFn: () => api.get<RouterSettings>("/api/integrations/glinet") });
+export const useRouter = () => useQuery({ queryKey: ["router"], queryFn: () => api.get<RouterSnapshot>("/api/router"), refetchInterval: 60_000 });
+
+export function useReserveOnRouter() {
+  const inv = useInvalidateInventory();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { ip: string; mac: string; name: string }) => api.post<{ detail: string }>("/api/router/reservations", body),
+    onSuccess: () => {
+      inv();
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["router"] }), 1500);
+    },
+  });
+}

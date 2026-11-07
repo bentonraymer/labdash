@@ -179,7 +179,7 @@ function SubnetView({ subnet, onEdit }: { subnet: Subnet; onEdit: () => void }) 
 }
 
 function OwnerChip({ owner: o }: { owner: IPCell["owners"][number] }) {
-  const prefix = { assignment: o.sub, host: "host", service: o.sub ? `:${o.sub}` : "service", device: "seen" }[o.kind];
+  const prefix = { assignment: o.sub, host: "host", service: o.sub ? `:${o.sub}` : "service", device: "seen", router: "router" }[o.kind];
   return (
     <span className="flex items-center gap-1.5 rounded bg-white/5 px-1.5 py-0.5 text-xs">
       {o.kind === "service" && <ServiceIcon icon={o.icon ?? ""} name={o.label} className="size-3.5" />}

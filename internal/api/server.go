@@ -21,6 +21,7 @@ import (
 	"github.com/bentonraymer/labdash/internal/auth"
 	"github.com/bentonraymer/labdash/internal/config"
 	"github.com/bentonraymer/labdash/internal/events"
+	"github.com/bentonraymer/labdash/internal/glinet"
 	"github.com/bentonraymer/labdash/internal/icons"
 	"github.com/bentonraymer/labdash/internal/integrations"
 	"github.com/bentonraymer/labdash/internal/monitor"
@@ -44,10 +45,12 @@ type Server struct {
 	Scanner      *scanner.Service
 	NPM          *npm.Client
 	Proxmox      *proxmox.Poller
+	GLiNet       *glinet.Client
 	// Restart exits the process so Docker restarts it (used to apply a restore).
 	Restart func()
 
 	npmCache npmCache
+	router   routerState
 	Web      fs.FS // built frontend (web/dist)
 	Version  string
 }
@@ -132,6 +135,11 @@ func (s *Server) Router() http.Handler {
 			r.Post("/integrations/proxmox/test", s.handleTestProxmox)
 			r.Get("/proxmox/resources", s.handleProxmoxResources)
 			r.Post("/wol", s.handleWOL)
+			r.Get("/integrations/glinet", s.handleGetGLiNet)
+			r.Put("/integrations/glinet", s.handlePutGLiNet)
+			r.Post("/integrations/glinet/test", s.handleTestGLiNet)
+			r.Get("/router", s.handleRouterData)
+			r.Post("/router/reservations", s.handleAddReservation)
 			r.Get("/backup", s.handleBackupDownload)
 			r.Get("/backups", s.handleListBackups)
 			r.Post("/backups", s.handleCreateBackup)
@@ -146,6 +154,7 @@ func (s *Server) Router() http.Handler {
 			r.Get("/notes", s.handleListNotes)
 			r.Post("/notes", s.handleCreateNote)
 			r.Get("/notes/search", s.handleSearchNotes)
+			r.Get("/notes/export", s.handleExportDocs)
 			r.Get("/notes/{id}", s.handleGetNote)
 			r.Patch("/notes/{id}", s.handleUpdateNote)
 			r.Delete("/notes/{id}", s.handleDeleteNote)
