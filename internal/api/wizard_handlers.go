@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bentonraymer/labdash/internal/glinet"
 	"github.com/bentonraymer/labdash/internal/urls"
 )
 
@@ -24,8 +25,11 @@ type wizardInput struct {
 		Kind      string `json:"kind"`
 		IntervalS int    `json:"intervalS"`
 	} `json:"monitor"`
-	CreateNote bool            `json:"createNote"`
-	NPM        *npmCreateInput `json:"npm"`
+	CreateNote        bool            `json:"createNote"`
+	NPM               *npmCreateInput `json:"npm"`
+	RouterReservation *struct {
+		MAC string `json:"mac"`
+	} `json:"routerReservation"`
 }
 
 type wizardStep struct {
@@ -180,6 +184,13 @@ func (s *Server) handleServiceWizard(w http.ResponseWriter, r *http.Request) {
 			_, _, _ = s.Monitor.CheckNow(cctx, monitorID)
 		}()
 	}
+	// Router reservation (GL.iNet), also external: reported, never rolled back.
+	if in.RouterReservation != nil && ip != "" {
+		rctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		detail, err := s.reserveOnRouter(rctx, glinet.StaticBind{Name: name, MAC: in.RouterReservation.MAC, IP: ip})
+		cancel()
+		steps = append(steps, wizardStep{"Router DHCP reservation", err == nil, firstNonEmpty(detail, errString(err))})
+	}
 	// NPM is an external system, so it runs after the commit: a failure is
 	// reported as a failed step instead of undoing the service.
 	if in.NPM != nil {
@@ -219,4 +230,18 @@ func noteTemplate(name string, t urls.Target, hostName string, h *deploymentInpu
 	}
 	b.WriteString("\n## Configuration\n\n<!-- compose file, env vars, volumes, reverse proxy settings… -->\n\n## Maintenance\n\n- Update: \n- Backups: \n\n## Notes\n\n")
 	return b.String()
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }

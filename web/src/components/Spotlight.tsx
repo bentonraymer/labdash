@@ -170,16 +170,16 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
     if (query) {
       for (const d of devices ?? []) {
         if (d.ignored) continue;
-        const title = d.hostname || d.ip;
+        const title = d.customName || d.routerName || d.hostname || d.ip;
         const m = fuzzyMatch(query, title);
-        const other = [d.ip, d.vendor, d.mac].map((t) => (t ? fuzzyMatch(query, t) : null)).reduce((b, x) => (x && x.score > b ? x.score : b), -1);
+        const other = [d.ip, d.vendor, d.mac, d.hostname].map((t) => (t ? fuzzyMatch(query, t) : null)).reduce((b, x) => (x && x.score > b ? x.score : b), -1);
         const score = Math.max(m?.score ?? -1, other > 0 ? other * 0.7 : -1);
         if (score < 0) continue;
         out.push({
           kind: "device",
           id: `d${d.id}`,
           title,
-          subtitle: [d.hostname ? d.ip : "", d.vendor, d.osName].filter(Boolean).join(" · ") || "Network device",
+          subtitle: [title !== d.ip ? d.ip : "", d.vendor, d.osName].filter(Boolean).join(" · ") || "Network device",
           score: score * 0.8,
           indices: m?.indices ?? [],
           ip: d.ip,

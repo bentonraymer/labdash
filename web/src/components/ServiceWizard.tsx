@@ -7,8 +7,9 @@ import { ServiceIcon } from "./ServiceIcon";
 import { IconPicker } from "./IconPicker";
 import { HostingFields, emptyHosting, hostingToInput, type HostingForm } from "./HostingFields";
 import { api, ApiError } from "@/lib/api";
-import { checkIP, useHosts, useLaunchpad, useNPMStatus, useSubnets } from "@/lib/queries";
+import { checkIP, useHosts, useLaunchpad, useNPMStatus, useRouter, useSubnets } from "@/lib/queries";
 import { CertPicker, defaultCert } from "./NPMPanel";
+import { isMac, useMacFor } from "./RouterBits";
 import { slugifyIconName } from "@/lib/icons";
 import { runtimeLabel } from "@/lib/labels";
 import type { IPCheck } from "@/lib/types";
@@ -37,6 +38,11 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   const npmReady = !!npmStatus?.enabled && !npmStatus.error;
   const certs = npmStatus?.certificates ?? [];
   const [npm, setNpm] = useState(true);
+  const { data: router } = useRouter();
+  const macFor = useMacFor();
+  const [reserveRouter, setReserveRouter] = useState(true);
+  const [mac, setMac] = useState("");
+  const [macTouched, setMacTouched] = useState(false);
   const [cert, setCert] = useState(0);
 
   const [step, setStep] = useState(0);
@@ -85,6 +91,9 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
     setInterval(60);
     setNote(true);
     setNpm(true);
+    setReserveRouter(true);
+    setMac("");
+    setMacTouched(false);
     setCheck(null);
     setErr("");
     setResult(null);
@@ -99,7 +108,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   useEffect(() => {
     if (ip || !hosting.hostId) return;
     const h = hosts.find((x) => String(x.id) === hosting.hostId);
-    if (h?.ip && hosting.runtime === "docker") setIp(h.ip);
+    if (h?.ip && (hosting.runtime === "docker" || hosting.runtime === "bare_metal")) setIp(h.ip);
   }, [hosting.hostId, hosting.runtime, hosts, ip]);
 
   // Live IP / port conflict check.
@@ -119,9 +128,17 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   const dnsUrl = useDns && sub && domain ? `https://${sub}.${domain}` : "";
   useEffect(() => setCert(defaultCert(certs, dnsUrl ? new URL(dnsUrl).hostname : "")), [certs, dnsUrl]);
   const canNPM = npmReady && !!dnsUrl && !!ip.trim() && !!port;
+  // Router reservation: prefill the MAC from the host, a scan or the router.
+  useEffect(() => {
+    if (!macTouched) setMac(macFor(ip.trim(), hosting.hostId ? Number(hosting.hostId) : null));
+  }, [ip, hosting.hostId, macFor, macTouched]);
+  const routerReady = !!router?.enabled && !router.error;
+  const alreadyReserved = router?.reservations.find((r) => r.ip === ip.trim());
+  const canReserve = routerReady && !!ip.trim() && !alreadyReserved;
 
   const directPreview = ip ? `${scheme}://${ip}${port ? `:${port}` : ""}${path ? (path.startsWith("/") ? path : `/${path}`) : ""}` : "";
-  const dockerOnSharedIp = hosting.runtime === "docker";
+  // Docker and bare-metal services share their host's IP.
+  const dockerOnSharedIp = hosting.runtime === "docker" || hosting.runtime === "bare_metal";
   const portTaken = !!check?.portOwner;
 
   const canNext = [!!name.trim(), true, !portTaken && (!!dnsUrl || !!ip.trim()) && (check?.valid ?? true) !== false, true, true][step];
@@ -149,6 +166,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
         monitor: monitor ? { kind: monitor, intervalS: interval } : null,
         createNote: note,
         npm: npm && canNPM ? { certificateId: cert, sslForced: cert > 0, websockets: true } : null,
+        routerReservation: reserveRouter && canReserve && isMac(mac) ? { mac: mac.trim() } : null,
       });
       setResult(res);
       qc.invalidateQueries();
@@ -243,7 +261,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
               <div>
                 <label className="label">Launchpad section</label>
                 <select className="input" value={section} onChange={(e) => setSection(e.target.value)}>
-                  <option value="">— None —</option>
+                  <option value="">— Not on dashboard —</option>
                   {lp?.sections.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
@@ -380,6 +398,39 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
             )}
           </Option>
           <Option checked={reserveIp && !!ip} disabled={!ip || dockerOnSharedIp} onChange={setReserveIp} title="Mark the IP as static" desc={dockerOnSharedIp ? "Docker services share their host's IP, so it's not reserved separately." : ip ? `Records ${ip} as a static assignment in IP Addresses.` : "No IP entered."} />
+          <Option
+            checked={reserveRouter && canReserve && isMac(mac)}
+            disabled={!canReserve}
+            onChange={setReserveRouter}
+            title="Reserve the IP on the router (GL.iNet)"
+            desc={
+              !routerReady
+                ? router?.error
+                  ? `Router error: ${router.error}`
+                  : "Connect your GL.iNet router in Settings to enable this."
+                : !ip.trim()
+                  ? "No IP entered."
+                  : alreadyReserved
+                    ? `${ip} is already reserved on the router for ${alreadyReserved.mac}.`
+                    : `Adds a DHCP reservation for ${ip} on the router's LAN page.`
+            }
+          >
+            {reserveRouter && canReserve && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-muted">
+                MAC
+                <input
+                  className="input w-48 py-1 font-mono text-xs"
+                  value={mac}
+                  onChange={(e) => {
+                    setMacTouched(true);
+                    setMac(e.target.value);
+                  }}
+                  placeholder="bc:24:11:…"
+                />
+                {!isMac(mac) && <span className="text-warn">Enter the device's MAC</span>}
+              </div>
+            )}
+          </Option>
           <Option checked={note} onChange={setNote} title="Create a docs page" desc="A markdown page pre-filled with access details and hosting, ready for config notes." />
           <Option
             checked={npm && canNPM}
@@ -414,7 +465,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
               <div className="text-xs text-muted">{desc || "No description"}</div>
             </div>
           </div>
-          <Review label="Section" value={lp?.sections.find((s) => String(s.id) === section)?.name ?? "None"} />
+          <Review label="Dashboard section" value={lp?.sections.find((s) => String(s.id) === section)?.name ?? "Not on dashboard"} />
           <Review
             label="Hosting"
             value={
@@ -429,6 +480,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
           <Review label="Monitor" value={monitor ? `${monitor.toUpperCase()} every ${interval}s` : "None"} />
           <Review label="IP reservation" value={reserveIp && ip && !dockerOnSharedIp ? `${ip} → static` : "No"} />
           <Review label="Docs page" value={note ? "Yes" : "No"} />
+          <Review label="Router reservation" value={reserveRouter && canReserve && isMac(mac) ? `${ip} → ${mac}` : "No"} />
           <Review label="NPM proxy host" value={npm && canNPM ? `Yes${cert ? ` · ${certs.find((c) => c.id === cert)?.name ?? "certificate"}` : " · HTTP only"}` : "No"} />
         </div>
       )}

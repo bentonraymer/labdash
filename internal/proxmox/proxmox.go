@@ -48,6 +48,8 @@ type Resource struct {
 	NetIn   float64 `json:"netin,omitempty"`
 	NetOut  float64 `json:"netout,omitempty"`
 	Tags    string  `json:"tags,omitempty"`
+	// Connection is the name of the LabDash connection that reported it.
+	Connection string `json:"connection"`
 }
 
 // Fetch reads every node and guest in one call.
@@ -96,16 +98,124 @@ func Fetch(ctx context.Context, cfg Config, sec Secret) ([]Resource, error) {
 	return res, nil
 }
 
-// Snapshot is the poller's latest view.
-type Snapshot struct {
-	Resources []Resource `json:"resources"`
-	FetchedAt string     `json:"fetchedAt"`
-	Error     string     `json:"error"`
-	Enabled   bool       `json:"enabled"`
+// ── multiple connections ──────────────────────────────────────────────────
+
+// Connection is one Proxmox endpoint: a standalone node, or any node of a
+// cluster (one connection per cluster is enough).
+type Connection struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	VerifyTLS bool   `json:"verifyTls"`
+	TokenID   string `json:"tokenId"`
 }
 
-// Loader returns the current config (and whether polling is enabled).
-type Loader func(ctx context.Context) (Config, Secret, bool, error)
+// StoredConfig is the plain-JSON part of the integration. URL/VerifyTLS are
+// the legacy single-connection fields, still read for older installs.
+type StoredConfig struct {
+	Connections []Connection `json:"connections"`
+	URL         string       `json:"url,omitempty"`
+	VerifyTLS   bool         `json:"verifyTls,omitempty"`
+}
+
+// StoredSecret holds token secrets keyed by connection ID (plus legacy fields).
+type StoredSecret struct {
+	Tokens      map[string]string `json:"tokens"`
+	TokenID     string            `json:"tokenId,omitempty"`
+	TokenSecret string            `json:"tokenSecret,omitempty"`
+}
+
+// Target is a connection with its secret, ready to poll.
+type Target struct {
+	Connection
+	Secret string
+}
+
+// Normalize converts legacy single-connection settings into the list form.
+func Normalize(cfg StoredConfig, sec StoredSecret) (StoredConfig, StoredSecret) {
+	if sec.Tokens == nil {
+		sec.Tokens = map[string]string{}
+	}
+	if len(cfg.Connections) == 0 && cfg.URL != "" {
+		cfg.Connections = []Connection{{ID: "legacy", Name: "Proxmox", URL: cfg.URL, VerifyTLS: cfg.VerifyTLS, TokenID: sec.TokenID}}
+		sec.Tokens["legacy"] = sec.TokenSecret
+	}
+	cfg.URL, cfg.VerifyTLS, sec.TokenID, sec.TokenSecret = "", false, "", ""
+	return cfg, sec
+}
+
+// Targets pairs each connection with its secret.
+func Targets(cfg StoredConfig, sec StoredSecret) []Target {
+	cfg, sec = Normalize(cfg, sec)
+	out := make([]Target, 0, len(cfg.Connections))
+	for _, c := range cfg.Connections {
+		out = append(out, Target{Connection: c, Secret: sec.Tokens[c.ID]})
+	}
+	return out
+}
+
+// FetchAll polls every target concurrently and merges the results. A
+// cluster reachable through two connections is only counted once.
+func FetchAll(ctx context.Context, targets []Target) ([]Resource, []ConnError) {
+	type result struct {
+		res []Resource
+		err error
+		t   Target
+	}
+	ch := make(chan result, len(targets))
+	for _, t := range targets {
+		go func(t Target) {
+			res, err := Fetch(ctx, Config{URL: t.URL, VerifyTLS: t.VerifyTLS}, Secret{TokenID: t.TokenID, TokenSecret: t.Secret})
+			ch <- result{res, err, t}
+		}(t)
+	}
+	seen := map[string]bool{}
+	var all []Resource
+	var errs []ConnError
+	results := make([]result, 0, len(targets))
+	for range targets {
+		results = append(results, <-ch)
+	}
+	// Stable order: same as the configured connections.
+	for _, t := range targets {
+		for _, r := range results {
+			if r.t.ID != t.ID {
+				continue
+			}
+			if r.err != nil {
+				errs = append(errs, ConnError{Name: t.Name, Error: r.err.Error()})
+				continue
+			}
+			for _, x := range r.res {
+				key := x.ID + "@" + x.Node
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				x.Connection = t.Name
+				all = append(all, x)
+			}
+		}
+	}
+	return all, errs
+}
+
+type ConnError struct {
+	Name  string `json:"name"`
+	Error string `json:"error"`
+}
+
+// Snapshot is the poller's latest view.
+type Snapshot struct {
+	Resources []Resource  `json:"resources"`
+	FetchedAt string      `json:"fetchedAt"`
+	Error     string      `json:"error"` // summary of Errors
+	Errors    []ConnError `json:"errors"`
+	Enabled   bool        `json:"enabled"`
+}
+
+// Loader returns the targets to poll (and whether polling is enabled).
+type Loader func(ctx context.Context) ([]Target, bool, error)
 
 // Poller refreshes stats every interval while the integration is enabled.
 type Poller struct {
@@ -151,20 +261,31 @@ func (p *Poller) Run(ctx context.Context) {
 }
 
 func (p *Poller) poll(ctx context.Context) {
-	cfg, sec, enabled, err := p.Load(ctx)
-	snap := Snapshot{Enabled: enabled, FetchedAt: time.Now().UTC().Format(time.RFC3339)}
-	if err == nil && enabled {
+	targets, enabled, err := p.Load(ctx)
+	snap := Snapshot{Enabled: enabled && len(targets) > 0, FetchedAt: time.Now().UTC().Format(time.RFC3339), Errors: []ConnError{}}
+	if err != nil {
+		snap.Errors = append(snap.Errors, ConnError{Name: "settings", Error: err.Error()})
+	} else if snap.Enabled {
 		fctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-		snap.Resources, err = Fetch(fctx, cfg, sec)
+		snap.Resources, snap.Errors = FetchAll(fctx, targets)
 		cancel()
+		if snap.Errors == nil {
+			snap.Errors = []ConnError{}
+		}
 	}
-	if err != nil && enabled {
-		snap.Error = err.Error()
-		slog.Debug("proxmox poll failed", "err", err)
-		// Keep showing the last good numbers, marked stale by the error.
-		p.mu.RLock()
-		snap.Resources = p.snap.Resources
-		p.mu.RUnlock()
+	if len(snap.Errors) > 0 {
+		parts := make([]string, len(snap.Errors))
+		for i, e := range snap.Errors {
+			parts[i] = e.Name + ": " + e.Error
+		}
+		snap.Error = strings.Join(parts, "; ")
+		slog.Debug("proxmox poll errors", "err", snap.Error)
+		if len(snap.Resources) == 0 {
+			// Keep the last good numbers visible, marked stale by the error.
+			p.mu.RLock()
+			snap.Resources = p.snap.Resources
+			p.mu.RUnlock()
+		}
 	}
 	if snap.Resources == nil {
 		snap.Resources = []Resource{}
@@ -172,7 +293,7 @@ func (p *Poller) poll(ctx context.Context) {
 	p.mu.Lock()
 	p.snap = snap
 	p.mu.Unlock()
-	if enabled {
+	if snap.Enabled {
 		p.Hub.Publish("proxmox", nil)
 	}
 }

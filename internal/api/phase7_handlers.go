@@ -147,6 +147,9 @@ func (s *Server) handleNPMStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	statuses := map[int64]npm.Status{}
 	for _, sv := range svcs {
+		if sv.ArchivedAt != nil {
+			continue
+		}
 		port := 0
 		if sv.DirectPort != nil {
 			port = *sv.DirectPort
@@ -238,50 +241,92 @@ func (s *Server) handleNPMCreate(w http.ResponseWriter, r *http.Request) {
 
 // ── Proxmox ───────────────────────────────────────────────────────────────
 
-func (s *Server) ProxmoxLoader(ctx context.Context) (proxmox.Config, proxmox.Secret, bool, error) {
-	var cfg proxmox.Config
-	var sec proxmox.Secret
+func (s *Server) proxmoxStored(ctx context.Context) (proxmox.StoredConfig, proxmox.StoredSecret, bool, error) {
+	var cfg proxmox.StoredConfig
+	var sec proxmox.StoredSecret
 	enabled, err := s.Integrations.Get(ctx, "proxmox", &cfg, &sec)
 	if errors.Is(err, integrations.ErrNotConfigured) {
-		return cfg, sec, false, nil
+		err = nil
 	}
+	cfg, sec = proxmox.Normalize(cfg, sec)
 	return cfg, sec, enabled, err
 }
 
+// ProxmoxLoader feeds the poller with every configured connection.
+func (s *Server) ProxmoxLoader(ctx context.Context) ([]proxmox.Target, bool, error) {
+	cfg, sec, enabled, err := s.proxmoxStored(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	return proxmox.Targets(cfg, sec), enabled, nil
+}
+
+type proxmoxConnView struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	URL       string `json:"url"`
+	VerifyTLS bool   `json:"verifyTls"`
+	TokenID   string `json:"tokenId"`
+	HasSecret bool   `json:"hasSecret"`
+}
+
 func (s *Server) handleGetProxmox(w http.ResponseWriter, r *http.Request) {
-	cfg, sec, enabled, err := s.ProxmoxLoader(r.Context())
+	cfg, sec, enabled, err := s.proxmoxStored(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"configured": cfg.URL != "" && sec.TokenID != "" && sec.TokenSecret != "", "enabled": enabled,
-		"url": cfg.URL, "verifyTls": cfg.VerifyTLS, "tokenId": sec.TokenID, "hasSecret": sec.TokenSecret != "",
-	})
+	conns := make([]proxmoxConnView, 0, len(cfg.Connections))
+	for _, c := range cfg.Connections {
+		conns = append(conns, proxmoxConnView{ID: c.ID, Name: c.Name, URL: c.URL, VerifyTLS: c.VerifyTLS, TokenID: c.TokenID, HasSecret: sec.Tokens[c.ID] != ""})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"configured": len(conns) > 0, "enabled": enabled, "connections": conns})
 }
 
 func (s *Server) handlePutProxmox(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Enabled     bool   `json:"enabled"`
-		URL         string `json:"url"`
-		VerifyTLS   bool   `json:"verifyTls"`
-		TokenID     string `json:"tokenId"`
-		TokenSecret string `json:"tokenSecret"` // '' keeps the stored one
+		Enabled     bool `json:"enabled"`
+		Connections []struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			URL         string `json:"url"`
+			VerifyTLS   bool   `json:"verifyTls"`
+			TokenID     string `json:"tokenId"`
+			TokenSecret string `json:"tokenSecret"` // '' keeps the stored one
+		} `json:"connections"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, sec, _, err := s.ProxmoxLoader(r.Context())
+	_, old, _, err := s.proxmoxStored(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	sec.TokenID = strings.TrimSpace(body.TokenID)
-	if body.TokenSecret != "" {
-		sec.TokenSecret = strings.TrimSpace(body.TokenSecret)
+	cfg := proxmox.StoredConfig{Connections: []proxmox.Connection{}}
+	sec := proxmox.StoredSecret{Tokens: map[string]string{}}
+	for i, c := range body.Connections {
+		id := strings.TrimSpace(c.ID)
+		if id == "" {
+			id = fmt.Sprintf("c%d-%d", time.Now().UnixNano()%1e9, i)
+		}
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			name = hostOf(strings.TrimSpace(c.URL))
+		}
+		if strings.TrimSpace(c.URL) == "" {
+			writeErr(w, http.StatusBadRequest, fmt.Sprintf("connection %q needs a URL", name))
+			return
+		}
+		cfg.Connections = append(cfg.Connections, proxmox.Connection{ID: id, Name: name, URL: strings.TrimSpace(c.URL), VerifyTLS: c.VerifyTLS, TokenID: strings.TrimSpace(c.TokenID)})
+		if c.TokenSecret != "" {
+			sec.Tokens[id] = strings.TrimSpace(c.TokenSecret)
+		} else {
+			sec.Tokens[id] = old.Tokens[id]
+		}
 	}
-	if err := s.Integrations.Put(r.Context(), "proxmox", body.Enabled, proxmox.Config{URL: strings.TrimSpace(body.URL), VerifyTLS: body.VerifyTLS}, sec); err != nil {
+	if err := s.Integrations.Put(r.Context(), "proxmox", body.Enabled, cfg, sec); err != nil {
 		serverErr(w, err)
 		return
 	}
@@ -290,26 +335,47 @@ func (s *Server) handlePutProxmox(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTestProxmox(w http.ResponseWriter, r *http.Request) {
-	cfg, sec, _, err := s.ProxmoxLoader(r.Context())
-	if err == nil {
-		var res []proxmox.Resource
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-		defer cancel()
-		res, err = proxmox.Fetch(ctx, cfg, sec)
-		if err == nil {
-			nodes, guests := 0, 0
+	targets, _, err := s.ProxmoxLoader(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if len(targets) == 0 {
+		writeErr(w, http.StatusBadRequest, "add a connection first")
+		return
+	}
+	type result struct {
+		Name   string `json:"name"`
+		OK     bool   `json:"ok"`
+		Nodes  int    `json:"nodes"`
+		Guests int    `json:"guests"`
+		Error  string `json:"error,omitempty"`
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	out := make([]result, len(targets))
+	var wg sync.WaitGroup
+	for i, t := range targets {
+		wg.Add(1)
+		go func(i int, t proxmox.Target) {
+			defer wg.Done()
+			res, err := proxmox.Fetch(ctx, proxmox.Config{URL: t.URL, VerifyTLS: t.VerifyTLS}, proxmox.Secret{TokenID: t.TokenID, TokenSecret: t.Secret})
+			out[i] = result{Name: t.Name, OK: err == nil}
+			if err != nil {
+				out[i].Error = err.Error()
+				return
+			}
 			for _, x := range res {
 				if x.Type == "node" {
-					nodes++
+					out[i].Nodes++
 				} else {
-					guests++
+					out[i].Guests++
 				}
 			}
-			writeJSON(w, http.StatusOK, map[string]int{"nodes": nodes, "guests": guests})
-			return
-		}
+		}(i, t)
 	}
-	writeErr(w, http.StatusBadGateway, err.Error())
+	wg.Wait()
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleProxmoxResources(w http.ResponseWriter, _ *http.Request) {

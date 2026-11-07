@@ -7,7 +7,7 @@ import { ModeToggle } from "@/components/ModeToggle";
 import { PageHeader } from "./AdminLayout";
 import { DashyImport } from "./DashyImport";
 import { PushoverCard } from "./PushoverCard";
-import { NPMCard, ProxmoxCard } from "./IntegrationCards";
+import { GLiNetCard, NPMCard, ProxmoxCard } from "./IntegrationCards";
 import { BackupCard } from "./BackupCard";
 
 function Card({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
@@ -135,6 +135,10 @@ export function SettingsPage() {
 
         <Card title="Proxmox" description="Live CPU / RAM / disk for nodes and linked VMs & LXCs">
           <ProxmoxCard />
+        </Card>
+
+        <Card title="GL.iNet router" description="Reserved IPs and client names from your router's LAN page">
+          <GLiNetCard />
         </Card>
 
         <Card title="Backup & restore">

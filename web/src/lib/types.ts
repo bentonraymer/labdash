@@ -17,6 +17,9 @@ export interface Settings {
   alerts_paused: boolean;
   new_device_alerts: boolean;
   backup_auto: boolean;
+  alert_group_seconds: number;
+  alert_max_per_hour: number;
+  alert_flap_protection: boolean;
   backup_keep: number;
   tile_glow: boolean;
   open_new_tab: boolean;
@@ -56,11 +59,13 @@ export interface Service {
   status: Status;
   latencyMs: number | null;
   hosting: Hosting | null;
+  archivedAt: string | null;
 }
 
 export interface Launchpad {
   sections: Section[];
   services: Service[];
+  archivedServices: Service[];
   settings: Settings;
 }
 
@@ -86,6 +91,7 @@ export interface Monitor {
   id: number;
   serviceId: number | null;
   serviceName: string;
+  serviceArchived: boolean;
   serviceIcon: string;
   sectionId: number | null;
   name: string;
@@ -190,14 +196,14 @@ export interface Subnet {
 }
 
 export interface IPOwner {
-  kind: "assignment" | "host" | "service" | "device";
+  kind: "assignment" | "host" | "service" | "device" | "router";
   id: number;
   label: string;
   sub: string;
   icon?: string;
 }
 
-export type CellState = "network" | "broadcast" | "gateway" | "static" | "reserved" | "service" | "dhcp" | "discovered" | "free" | "unmanaged";
+export type CellState = "network" | "broadcast" | "gateway" | "static" | "reserved" | "service" | "lease" | "dhcp" | "discovered" | "free" | "unmanaged";
 
 export interface IPCell {
   ip: string;
@@ -292,6 +298,8 @@ export interface Device {
   mac: string;
   ip: string;
   hostname: string;
+  customName: string;
+  routerName: string;
   vendor: string;
   osName: string;
   osFamily: string;
@@ -386,13 +394,19 @@ export interface NPMStatus {
   proxyHosts?: number;
 }
 
-export interface ProxmoxSettings {
-  configured: boolean;
-  enabled: boolean;
+export interface ProxmoxConnection {
+  id: string;
+  name: string;
   url: string;
   verifyTls: boolean;
   tokenId: string;
   hasSecret: boolean;
+}
+
+export interface ProxmoxSettings {
+  configured: boolean;
+  enabled: boolean;
+  connections: ProxmoxConnection[];
 }
 
 export interface PveResource {
@@ -409,12 +423,14 @@ export interface PveResource {
   disk: number;
   maxdisk: number;
   uptime: number;
+  connection: string;
 }
 
 export interface ProxmoxSnapshot {
   resources: PveResource[];
   fetchedAt: string;
   error: string;
+  errors: { name: string; error: string }[];
   enabled: boolean;
 }
 
@@ -422,4 +438,36 @@ export interface StoredBackup {
   name: string;
   size: number;
   createdAt: string;
+}
+
+// ── GL.iNet router ────────────────────────────────────────────────────────
+export interface RouterSettings {
+  configured: boolean;
+  enabled: boolean;
+  url: string;
+  username: string;
+  hasPassword: boolean;
+}
+
+export interface RouterReservation {
+  name: string;
+  mac: string;
+  ip: string;
+}
+
+export interface RouterClient {
+  mac: string;
+  ip: string;
+  name: string;
+  alias: string;
+  online: boolean;
+  iface: string;
+}
+
+export interface RouterSnapshot {
+  enabled: boolean;
+  error: string;
+  fetchedAt: string;
+  reservations: RouterReservation[];
+  clients: RouterClient[];
 }

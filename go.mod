@@ -3,6 +3,7 @@ module github.com/bentonraymer/labdash
 go 1.26.0
 
 require (
+	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/pressly/goose/v3 v3.29.0
 	github.com/robfig/cron/v3 v3.0.1

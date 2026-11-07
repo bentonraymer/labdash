@@ -25,8 +25,9 @@ export function NPMBadge({ status }: { status?: NPMServiceStatus }) {
 // ── Proxmox stats ─────────────────────────────────────────────────────────
 
 export interface PveIndex {
-  byVMID: Map<number, PveResource>;
   byNode: Map<string, PveResource>;
+  /** A guest by VMID. Standalone nodes can reuse VMIDs, so pass the node when known. */
+  guest: (vmid: number, node?: string) => PveResource | undefined;
   error: string;
   enabled: boolean;
 }
@@ -35,13 +36,20 @@ export function usePve(): PveIndex | null {
   const { data } = useProxmox();
   return useMemo(() => {
     if (!data?.enabled) return null;
-    const byVMID = new Map<number, PveResource>();
+    const byVMID = new Map<number, PveResource[]>();
     const byNode = new Map<string, PveResource>();
     for (const r of data.resources) {
       if (r.type === "node") byNode.set(r.node.toLowerCase(), r);
-      else if (r.vmid) byVMID.set(r.vmid, r);
+      else if (r.vmid) byVMID.set(r.vmid, [...(byVMID.get(r.vmid) ?? []), r]);
     }
-    return { byVMID, byNode, error: data.error, enabled: true };
+    const guest = (vmid: number, node?: string) => {
+      const list = byVMID.get(vmid);
+      if (!list?.length) return undefined;
+      if (list.length === 1) return list[0];
+      const n = node?.toLowerCase();
+      return list.find((r) => r.node.toLowerCase() === n); // ambiguous without a node match
+    };
+    return { byNode, guest, error: data.error, enabled: true };
   }, [data]);
 }
 
@@ -52,16 +60,19 @@ export function useServiceGuest() {
   const hostById = useMemo(() => new Map(hosts.map((h) => [h.id, h])), [hosts]);
   return (s: Service): PveResource | undefined => {
     if (!pve || !s.hosting) return undefined;
-    if (s.hosting.vmid) return pve.byVMID.get(s.hosting.vmid);
+    // The LabDash host tree's root is normally the Proxmox node (pve1…).
+    if (s.hosting.vmid) return pve.guest(s.hosting.vmid, s.hosting.nodeName);
     const h = s.hosting.hostId ? hostById.get(s.hosting.hostId) : undefined;
-    if (h?.vmid) return pve.byVMID.get(h.vmid);
+    if (h?.vmid) return pve.guest(h.vmid, h.nodeName);
+    // Bare metal on a Proxmox node: the service is the node.
+    if (h && s.hosting.runtime === "bare_metal" && h.kind === "proxmox_node") return pve.byNode.get(h.name.toLowerCase());
     return undefined;
   };
 }
 
 export function hostResource(pve: PveIndex | null, h: Host): PveResource | undefined {
   if (!pve) return undefined;
-  if (h.vmid) return pve.byVMID.get(h.vmid);
+  if (h.vmid) return pve.guest(h.vmid, h.nodeName);
   if (h.kind === "proxmox_node") return pve.byNode.get(h.name.toLowerCase());
   return undefined;
 }

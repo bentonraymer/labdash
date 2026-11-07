@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import clsx from "clsx";
-import { FileText, Folder as FolderIcon, FolderPlus, Hash, Inbox, Layers, Pencil, Pin, Plus, Search, Trash2 } from "lucide-react";
+import { Download, FileText, Folder as FolderIcon, FolderPlus, Hash, Inbox, Layers, Pencil, Pin, Plus, Search, Trash2 } from "lucide-react";
 import { searchNotes, useCreateNote, useDeleteFolder, useFolders, useNotes, useSaveFolder, useTags } from "@/lib/queries";
 import type { Folder, NoteHit, NoteSummary } from "@/lib/types";
 import { ago } from "@/lib/time";
@@ -157,6 +157,11 @@ export function DocsPage() {
             </>
           )}
         </nav>
+        <div className="border-t border-line p-3">
+          <a href="/api/notes/export" download className="btn-ghost w-full justify-start px-2 py-1.5 text-xs" title="Every note as markdown, sorted into folders, with attachments">
+            <Download size={14} /> Download all docs (.zip)
+          </a>
+        </div>
       </aside>
 
       {/* Note list */}

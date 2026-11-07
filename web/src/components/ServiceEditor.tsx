@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { FileText, ImagePlus, Plus, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, FileText, ImagePlus, Plus, Trash2, X } from "lucide-react";
 import { useOpenServiceDocs } from "@/lib/serviceDocs";
 import { Modal } from "./Modal";
 import { ServiceIcon } from "./ServiceIcon";
 import { IconPicker } from "./IconPicker";
-import { useDeleteService, useLaunchpad, useSaveDeployment, useSaveMonitor, useSaveService } from "@/lib/queries";
+import { useDeleteService, useHosts, useLaunchpad, useSaveDeployment, useSaveMonitor, useSaveService } from "@/lib/queries";
 import { NPMPanel } from "./NPMPanel";
 import { HostingFields, hostingFromService, hostingToInput, type HostingForm } from "./HostingFields";
 import { slugifyIconName } from "@/lib/icons";
@@ -78,6 +78,15 @@ export function ServiceEditor({
   const saveMonitor = useSaveMonitor();
   const saveDeployment = useSaveDeployment();
   const openDocs = useOpenServiceDocs();
+  const { data: hosts = [] } = useHosts();
+  // Bare metal on a host = the service *is* that host: take its IP.
+  const onHosting = (h: HostingForm) => {
+    setHosting(h);
+    if (h.runtime === "bare_metal" && h.hostId) {
+      const host = hosts.find((x) => String(x.id) === h.hostId);
+      if (host?.ip) setF((p) => (p.directIp ? p : { ...p, directIp: host.ip }));
+    }
+  };
   const [hosting, setHosting] = useState<HostingForm>(hostingFromService(null));
   const domain = data?.settings.dns_domain || "";
 
@@ -167,6 +176,17 @@ export function ServiceEditor({
             <button
               type="button"
               className="btn-ghost"
+              title={service.archivedAt ? "Bring back to the dashboard, monitoring and IP tracking" : "Hide from the dashboard, monitoring and IP tracking; keep docs and history"}
+              onClick={() => save.mutate({ id: service.id, archived: !service.archivedAt }, { onSuccess: onClose })}
+            >
+              {service.archivedAt ? <ArchiveRestore size={15} /> : <Archive size={15} />}
+              {service.archivedAt ? "Restore" : "Archive"}
+            </button>
+          )}
+          {service && (
+            <button
+              type="button"
+              className="btn-ghost"
               onClick={() => {
                 onClose();
                 openDocs(service.id, service.name);
@@ -186,6 +206,11 @@ export function ServiceEditor({
       }
     >
       <form id="service-form" onSubmit={submit} className="grid gap-4">
+        {service?.archivedAt && (
+          <div className="flex items-center gap-2 rounded-md border border-line-2 bg-white/5 px-3 py-2 text-xs text-muted">
+            <Archive size={14} /> Archived {new Date(service.archivedAt).toLocaleDateString()}: not on the dashboard, not monitored, and its IP and ports count as free.
+          </div>
+        )}
         <div className="flex gap-4">
           <button
             type="button"
@@ -206,7 +231,7 @@ export function ServiceEditor({
             <div>
               <label className="label">Section</label>
               <select className="input" value={f.sectionId} onChange={(e) => set("sectionId", e.target.value)}>
-                <option value="">— None —</option>
+                <option value="">— Not on dashboard —</option>
                 {data?.sections.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -280,7 +305,7 @@ export function ServiceEditor({
 
         <fieldset className="rounded-lg border border-line p-4">
           <legend className="px-1 text-xs font-semibold text-muted">Hosting</legend>
-          <HostingFields value={hosting} onChange={setHosting} />
+          <HostingFields value={hosting} onChange={onHosting} />
         </fieldset>
 
         <div>

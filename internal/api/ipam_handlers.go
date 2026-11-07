@@ -20,7 +20,7 @@ import (
 // ── IP usage: everything that claims an address ───────────────────────────
 
 type IPOwner struct {
-	Kind  string `json:"kind"` // assignment | host | service | device
+	Kind  string `json:"kind"` // assignment | host | service | device | router
 	ID    int64  `json:"id"`
 	Label string `json:"label"`
 	Sub   string `json:"sub"` // assignment kind / host kind / port / vendor
@@ -43,9 +43,16 @@ func (s *Server) ipUsage(ctx context.Context) (map[string][]IPOwner, error) {
 	queries := []q{
 		{`SELECT id, ip, COALESCE(NULLIF(label, ''), (SELECT name FROM services WHERE id = service_id), (SELECT name FROM hosts WHERE id = host_id), ''), kind, '' FROM ip_assignments`, "assignment"},
 		{`SELECT id, ip, name, kind, '' FROM hosts WHERE ip != ''`, "host"},
-		{`SELECT id, direct_ip, name, COALESCE(CAST(direct_port AS TEXT), ''), icon FROM services WHERE direct_ip != ''`, "service"},
-		{`SELECT id, ip, COALESCE(NULLIF(hostname, ''), NULLIF(vendor, ''), mac), vendor, '' FROM devices
+		{`SELECT id, direct_ip, name, COALESCE(CAST(direct_port AS TEXT), ''), icon FROM services WHERE direct_ip != '' AND archived_at IS NULL`, "service"},
+		{`SELECT id, ip, COALESCE(NULLIF(custom_name, ''), NULLIF(router_name, ''), NULLIF(hostname, ''), NULLIF(vendor, ''), mac), vendor, '' FROM devices
 		  WHERE ip != '' AND ignored = 0 AND last_seen >= ?`, "device"},
+	}
+	for _, b := range s.routerSnapshot().Reservations {
+		label := b.Name
+		if label == "" {
+			label = b.MAC
+		}
+		add(b.IP, IPOwner{Kind: "router", Label: label, Sub: b.MAC})
 	}
 	since := time.Now().UTC().Add(-7 * 24 * time.Hour).Format("2006-01-02T15:04:05.000Z")
 	for _, qq := range queries {
@@ -242,6 +249,8 @@ func cellState(sn ipam.Subnet, a netip.Addr, owners []IPOwner) string {
 		return "static"
 	case has["service"]:
 		return "service"
+	case has["router"]:
+		return "lease"
 	case has["reserved"]:
 		return "reserved"
 	case has["dhcplease"]:
@@ -322,7 +331,7 @@ func (s *Server) portRows(ctx context.Context, ip string) ([]PortRow, error) {
 		order = append(order, k)
 		return p
 	}
-	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, icon, direct_port FROM services WHERE direct_ip = ? AND direct_port IS NOT NULL`, ip)
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, name, icon, direct_port FROM services WHERE direct_ip = ? AND direct_port IS NOT NULL AND archived_at IS NULL`, ip)
 	if err != nil {
 		return nil, err
 	}
