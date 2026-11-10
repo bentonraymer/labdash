@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import clsx from "clsx";
-import { AlertTriangle, Database, Globe, Loader2, Play, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Check, Database, Globe, Loader2, Play, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { useRunVulnScan, useScanTargets, useVulns, useVulnStatus, useVulnSync } from "@/lib/queries";
-import type { Severity, VulnFinding, VulnStatusKind } from "@/lib/types";
-import { ago, fmtDateTime } from "@/lib/time";
+import type { ScanTarget, Severity, VulnFinding, VulnScanState, VulnStatusKind } from "@/lib/types";
+import { ago, duration, fmtDateTime } from "@/lib/time";
 import { FindingList, sevStyle, severities, sourceLabel } from "@/components/VulnBits";
 import { PageHeader } from "../AdminLayout";
+import { VulnHistoryChart } from "./VulnHistoryChart";
 
 const statusTabs: { id: VulnStatusKind | "all"; label: string }[] = [
   { id: "open", label: "Open" },
@@ -66,15 +67,7 @@ export function VulnerabilitiesPage() {
         }
       />
       <div className="grid gap-5 p-6">
-        {scan?.running && (
-          <div className="flex items-center gap-3 rounded-lg border border-accent/40 bg-accent/10 px-4 py-2.5 text-sm">
-            <Loader2 size={15} className="animate-spin text-accent" />
-            <span>
-              Scanning <b className="font-mono">{scan.cidr}</b>: {scan.phase}
-            </span>
-            <span className="ml-auto text-xs text-muted">started {ago(scan.started)}</span>
-          </div>
-        )}
+        {scan?.running && <ScanProgress scan={scan} targets={targets} />}
         {run.error && <div className="text-sm text-down">{run.error.message}</div>}
 
         <DataSources />
@@ -110,6 +103,8 @@ export function VulnerabilitiesPage() {
             <div className="text-xs text-muted">Last scan{lastScan ? ` · ${lastScan.devices} devices` : ""}</div>
           </div>
         </div>
+
+        <VulnHistoryChart />
 
         {lastScan?.notes && (
           <div className="grid gap-1 rounded-lg border border-warn/30 bg-warn/5 px-4 py-2.5 text-xs text-warn">
@@ -191,6 +186,99 @@ export function VulnerabilitiesPage() {
         </p>
       </div>
     </>
+  );
+}
+
+const stepNames = ["Config & TLS checks", "CVE matching", "Web checks"];
+const stepHints = [
+  "nmap checks versions, TLS and risky settings on each open port",
+  "Detected versions are looked up in the local CVE database",
+  "Nuclei runs safe web checks against each web port",
+];
+
+/** Live progress of a running vulnerability scan: steps, bar, time, ETA. */
+function ScanProgress({ scan, targets }: { scan: VulnScanState; targets: ScanTarget[] }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const step = scan.step ?? 0;
+  const steps = scan.steps ?? stepNames.length;
+  const pct = Math.max(0, Math.min(100, scan.percent ?? 0));
+  const known = (scan.percent ?? -1) >= 0;
+  const elapsed = scan.started ? now - Date.parse(scan.started) : 0;
+  const stepElapsed = scan.stepStarted ? now - Date.parse(scan.stepStarted) : 0;
+  // Remaining time for this step from its pace so far (once there's enough to go on).
+  const eta = known && pct >= 3 && pct < 100 && stepElapsed > 10_000 ? (stepElapsed * (100 - pct)) / pct : null;
+  const name = (id: number) => targets.find((t) => t.id === id)?.name;
+  const queued = scan.queued.filter((id) => id !== scan.targetId);
+  return (
+    <div className="grid gap-3 rounded-lg border border-accent/40 bg-accent/[0.07] px-4 py-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <Loader2 size={15} className="animate-spin text-accent" />
+        <span>
+          Scanning <b>{name(scan.targetId) || "target"}</b> <span className="font-mono text-muted">{scan.cidr}</span>
+        </span>
+        <span className="text-xs text-muted">
+          {scan.devices ? `${scan.devices} device${scan.devices === 1 ? "" : "s"}` : ""}
+          {scan.urls ? ` · ${scan.urls} web URL${scan.urls === 1 ? "" : "s"}` : ""}
+        </span>
+        <span className="ml-auto text-xs text-muted tabular-nums">
+          {(scan.found ?? 0) > 0 && <b className="mr-3 text-warn">{scan.found} found so far</b>}
+          {duration(elapsed)} elapsed
+        </span>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2">
+        {stepNames.slice(0, steps).map((label, i) => {
+          const n = i + 1;
+          const state = n < step ? "done" : n === step ? "active" : "pending";
+          return (
+            <div
+              key={label}
+              title={stepHints[i]}
+              className={clsx(
+                "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs",
+                state === "done" && "border-up/30 text-up",
+                state === "active" && "border-accent/60 bg-accent/10 text-fg",
+                state === "pending" && "border-line text-faint",
+              )}
+            >
+              <span
+                className={clsx(
+                  "grid size-4 shrink-0 place-items-center rounded-full text-[10px] font-semibold",
+                  state === "done" && "bg-up/20",
+                  state === "active" && "bg-accent text-white",
+                  state === "pending" && "border border-line-2",
+                )}
+              >
+                {state === "done" ? <Check size={10} /> : n}
+              </span>
+              <span className="truncate">{label}</span>
+              {state === "active" && known && <span className="ml-auto tabular-nums text-muted">{Math.floor(pct)}%</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      <div>
+        <div className="h-1.5 overflow-hidden rounded-full bg-white/10">
+          {known ? (
+            <div className="h-full rounded-full bg-accent transition-[width] duration-700" style={{ width: `${pct}%` }} />
+          ) : (
+            <div className="h-full w-1/3 animate-pulse rounded-full bg-accent/60" />
+          )}
+        </div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 text-xs text-muted">
+          <span className="min-w-0 truncate">{scan.detail || scan.phase || "Starting…"}</span>
+          <span className="ml-auto tabular-nums">
+            {eta !== null ? `about ${duration(eta)} left in this step` : step > 0 ? `step ${step} of ${steps}` : ""}
+          </span>
+        </div>
+      </div>
+      {queued.length > 0 && <div className="text-xs text-faint">Queued next: {queued.map((id) => name(id) || `#${id}`).join(", ")}</div>}
+    </div>
   );
 }
 

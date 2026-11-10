@@ -36,6 +36,7 @@ var settingSpecs = map[string]settingSpec{
 	"tile_glow":             {true, isBool},
 	"open_new_tab":          {true, isBool},
 	"vuln_enabled":          {true, isBool},
+	"updates_digest":        {true, isBool},
 	"vuln_alert_min":        {"high", oneOf("critical", "high", "medium", "low", "off")},
 }
 

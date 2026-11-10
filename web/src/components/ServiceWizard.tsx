@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { AlertTriangle, Check, CheckCircle2, ChevronLeft, ChevronRight, ImagePlus, Info, Plus, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronLeft, ChevronRight, ImagePlus, Info, Plus, Radar, Sparkles, X } from "lucide-react";
 import { Modal } from "./Modal";
 import { ServiceIcon } from "./ServiceIcon";
 import { IconPicker } from "./IconPicker";
@@ -10,6 +10,7 @@ import { api, ApiError } from "@/lib/api";
 import { checkIP, useHosts, useLaunchpad, useNPMStatus, useRouter, useSubnets } from "@/lib/queries";
 import { CertPicker, defaultCert } from "./NPMPanel";
 import { ParentPicker } from "./ParentPicker";
+import { hostOf } from "./IntegrationBits";
 import { isMac, useMacFor } from "./RouterBits";
 import { slugifyIconName } from "@/lib/icons";
 import { runtimeLabel } from "@/lib/labels";
@@ -133,9 +134,12 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
     return () => clearTimeout(t);
   }, [ip, port]);
 
-  const customUrl = customHost.trim() ? (/^https?:\/\//i.test(customHost.trim()) ? customHost.trim() : `https://${customHost.trim()}`) : "";
+  const customRaw = customHost.trim() ? (/^https?:\/\//i.test(customHost.trim()) ? customHost.trim() : `https://${customHost.trim()}`) : "";
+  // Only a URL with a real hostname counts (it's half-typed while e.g. "https://" is entered).
+  const customUrl = hostOf(customRaw).includes(".") ? customRaw : "";
+  const customInvalid = !!customHost.trim() && !customUrl;
   const dnsUrl = dnsMode === "custom" ? customUrl : dnsMode === "wild" && useDns && sub && domain ? `https://${sub}.${domain}` : "";
-  useEffect(() => setCert(defaultCert(certs, dnsUrl ? new URL(dnsUrl).hostname : "")), [certs, dnsUrl]);
+  useEffect(() => setCert(defaultCert(certs, dnsUrl ? hostOf(dnsUrl) : "")), [certs, dnsUrl]);
   const canNPM = npmReady && !!dnsUrl && !!ip.trim() && !!port;
   // Router reservation: prefill the MAC from the host, a scan or the router.
   useEffect(() => {
@@ -150,7 +154,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   const dockerOnSharedIp = hosting.runtime === "docker" || hosting.runtime === "bare_metal";
   const portTaken = !!check?.portOwner;
 
-  const canNext = [!!name.trim(), true, !portTaken && (!!dnsUrl || !!ip.trim()) && (check?.valid ?? true) !== false, true, true][step];
+  const canNext = [!!name.trim(), true, !portTaken && !(dnsMode === "custom" && customInvalid) && (!!dnsUrl || !!ip.trim()) && (check?.valid ?? true) !== false, true, true][step];
 
   const create = async () => {
     setBusy(true);
@@ -332,7 +336,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
               <label className="label">Path</label>
               <input className="input font-mono" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/web (optional)" />
             </div>
-            <IPFeedback check={check} ip={ip} port={port} sharedIp={dockerOnSharedIp} />
+            <IPFeedback check={check} ip={ip} port={port} ownIp={hosting.runtime === "vm" || hosting.runtime === "lxc"} />
           </fieldset>
 
           <fieldset className="rounded-lg border border-line p-4">
@@ -379,6 +383,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
             {dnsMode === "custom" && (
               <>
                 <input className="input font-mono" value={customHost} onChange={(e) => setCustomHost(e.target.value)} placeholder="links.example.org  or  https://status.example.com/app" />
+                {customInvalid && <p className="mt-1 text-xs text-warn">Enter a full hostname, like links.example.org</p>}
                 <p className="mt-1 text-[11px] text-faint">Any hostname or full URL. LabDash won't touch DNS for it; NPM checks still work if NPM serves that name.</p>
               </>
             )}
@@ -481,7 +486,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
           >
             {npm && canNPM && (
               <div className="mt-2 flex items-center gap-2 text-xs text-muted">
-                SSL certificate <CertPicker certs={certs} domain={dnsUrl ? new URL(dnsUrl).hostname : ""} value={cert} onChange={setCert} />
+                SSL certificate <CertPicker certs={certs} domain={hostOf(dnsUrl)} value={cert} onChange={setCert} />
               </div>
             )}
           </Option>
@@ -520,24 +525,46 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   );
 }
 
-function IPFeedback({ check, ip, port, sharedIp }: { check: IPCheck | null; ip: string; port: string; sharedIp: boolean }) {
+/** ownIp: the service is a VM / LXC, which needs an address of its own. */
+function IPFeedback({ check, ip, port, ownIp }: { check: IPCheck | null; ip: string; port: string; ownIp: boolean }) {
   if (!ip.trim() || !check) return null;
   if (!check.valid) return <Note tone="down" icon={<AlertTriangle size={13} />}>Not a valid IP address.</Note>;
-  const others = (check.owners ?? []).filter((o) => o.kind !== "device");
+  // A router DHCP reservation just pins the address to a machine's MAC; it
+  // isn't something else "using" the IP, so it's shown as info, not a warning.
+  const router = (check.owners ?? []).filter((o) => o.kind === "router");
+  const others = (check.owners ?? []).filter((o) => o.kind !== "device" && o.kind !== "router");
   return (
     <div className="mt-3 grid gap-1.5">
       {check.subnet ? <Note tone="muted" icon={<Info size={13} />}>In {check.subnet}</Note> : <Note tone="warn" icon={<Info size={13} />}>Not inside any subnet you've added.</Note>}
       {check.reserved && <Note tone="down" icon={<AlertTriangle size={13} />}>That's the network, broadcast or gateway address.</Note>}
       {check.inDhcp && <Note tone="warn" icon={<AlertTriangle size={13} />}>Inside the DHCP range: the router could hand it to another device.</Note>}
       {others.length > 0 &&
-        (sharedIp ? (
-          <Note tone="muted" icon={<Info size={13} />}>Shared with {others.map((o) => o.label).join(", ")} (fine for Docker).</Note>
+        (ownIp ? (
+          <Note tone="warn" icon={<AlertTriangle size={13} />}>
+            Already used by {others.map((o) => `${o.label} (${o.kind})`).join(", ")}. A VM or LXC normally needs its own IP.
+          </Note>
         ) : (
-          <Note tone="warn" icon={<AlertTriangle size={13} />}>Already used by {others.map((o) => `${o.label} (${o.kind})`).join(", ")}.</Note>
+          // Several services on one machine share its IP; only the port has to be free.
+          <Note tone="muted" icon={<Info size={13} />}>Same IP as {others.map((o) => `${o.label} (${o.kind})`).join(", ")}: fine as long as the port is free.</Note>
         ))}
-      {check.seenOnNetwork && others.length === 0 && <Note tone="warn" icon={<AlertTriangle size={13} />}>A device was recently seen at this IP by a scan.</Note>}
-      {port && check.portOwner && <Note tone="down" icon={<AlertTriangle size={13} />}>Port {port} is already used by {check.portOwner}.</Note>}
-      {port && !check.portOwner && <Note tone="up" icon={<Check size={13} />}>Port {port} is free on this IP.</Note>}
+      {router.map((o) => (
+        <Note key={o.mac || o.label} tone="muted" icon={<Info size={13} />}>
+          Reserved on the router for {o.label && o.label !== o.mac ? `${o.label} (${o.mac})` : o.mac}.
+        </Note>
+      ))}
+      {check.seenOnNetwork && others.length === 0 && router.length === 0 && <Note tone="muted" icon={<Radar size={13} />}>A scan recently saw a device at this IP.</Note>}
+      {port && check.portOwner && <Note tone="down" icon={<AlertTriangle size={13} />}>Port {port} is already used by the service {check.portOwner}.</Note>}
+      {port && !check.portOwner && check.portClaim !== undefined && (
+        <Note tone="up" icon={<Check size={13} />}>
+          You noted port {port}{check.portClaim ? ` as "${check.portClaim}"` : ""}; it will be linked to this service.
+        </Note>
+      )}
+      {port && !check.portOwner && check.portClaim === undefined && check.portSeen && (
+        <Note tone="up" icon={<Radar size={13} />}>
+          A scan found {[check.portSeen.title, check.portSeen.banner].filter(Boolean).join(" · ") || "something"} on port {port}. Adding it as a service is fine.
+        </Note>
+      )}
+      {port && !check.portOwner && check.portClaim === undefined && !check.portSeen && <Note tone="up" icon={<Check size={13} />}>Port {port} is free on this IP.</Note>}
     </div>
   );
 }

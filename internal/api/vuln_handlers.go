@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
+
+	"github.com/bentonraymer/labdash/internal/vuln"
 )
 
 type VulnFinding struct {
@@ -88,6 +91,23 @@ func (s *Server) handleListVulns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// GET /api/vulns/history?days=90
+func (s *Server) handleVulnHistory(w http.ResponseWriter, r *http.Request) {
+	days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	if days <= 0 {
+		days = 90
+	}
+	if days > 730 {
+		days = 730
+	}
+	pts, err := vuln.History(r.Context(), s.DB, days, time.Now())
+	if err != nil {
+		serverErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pts)
+}
+
 // PATCH /api/vulns/{id} {status?: open|accepted|ignored, note?}
 func (s *Server) handleUpdateVuln(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r)
@@ -124,6 +144,7 @@ func (s *Server) handleUpdateVuln(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
+	_ = vuln.RecordHistory(r.Context(), s.DB, time.Now())
 	s.Events.Publish("vulns", map[string]any{"id": id})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

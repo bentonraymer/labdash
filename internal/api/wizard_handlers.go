@@ -128,6 +128,17 @@ func (s *Server) handleServiceWizard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A port note you made earlier for this IP:port (with no service) now
+	// belongs to this service.
+	if svc.DirectPort != nil && ip != "" {
+		if res, err := tx.ExecContext(ctx, `UPDATE port_claims SET service_id = ? WHERE ip = ? AND port = ? AND proto = 'tcp' AND service_id IS NULL`,
+			id, ip, *svc.DirectPort); err != nil {
+			serverErr(w, err)
+			return
+		} else if n, _ := res.RowsAffected(); n > 0 {
+			steps = append(steps, wizardStep{"Port claim", true, fmt.Sprintf("linked your existing note for %s:%d", ip, *svc.DirectPort)})
+		}
+	}
 	for _, p := range in.ExtraPorts {
 		pc := portClaimInput{IP: ip, Port: p.Port, Proto: p.Proto, ServiceID: &id, Label: p.Label}
 		if err := pc.validate(); err != nil {

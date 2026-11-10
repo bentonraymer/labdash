@@ -297,3 +297,93 @@ func (p *Poller) poll(ctx context.Context) {
 		p.Hub.Publish("proxmox", nil)
 	}
 }
+
+// ── pending package updates (for the Updates page) ───────────────────────
+
+// AptPackage is one pending update on a node (GET /nodes/{node}/apt/update).
+type AptPackage struct {
+	Package    string `json:"package"`
+	OldVersion string `json:"oldVersion"`
+	Version    string `json:"version"`
+	Title      string `json:"title"`
+	Priority   string `json:"priority"`
+}
+
+// NodeUpdates is the pending-update list for one node.
+type NodeUpdates struct {
+	Node       string       `json:"node"`
+	Connection string       `json:"connection"`
+	PVEVersion string       `json:"pveVersion"`
+	Packages   []AptPackage `json:"packages"`
+	Error      string       `json:"error,omitempty"`
+}
+
+func get(ctx context.Context, t Target, path string, out any) error {
+	base := strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(t.URL), "/"), "/api2/json")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/api2/json"+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("PVEAPIToken=%s=%s", t.TokenID, t.Secret))
+	client := &http.Client{
+		Timeout:   20 * time.Second,
+		Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: !t.VerifyTLS}}, //nolint:gosec // self-signed by default
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("can't reach Proxmox: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusForbidden, http.StatusUnauthorized:
+		return errors.New("the API token isn't allowed to list updates (needs Sys.Modify on /nodes, or use a separate token for this)")
+	default:
+		return fmt.Errorf("Proxmox: %s", resp.Status)
+	}
+	return json.Unmarshal(body, &struct {
+		Data any `json:"data"`
+	}{Data: out})
+}
+
+// FetchNodeUpdates lists pending apt updates on every node the targets can see.
+// Proxmox refreshes this list itself once a day (pve-daily-update).
+func FetchNodeUpdates(ctx context.Context, targets []Target) []NodeUpdates {
+	var out []NodeUpdates
+	seen := map[string]bool{}
+	for _, t := range targets {
+		var nodes []struct {
+			Node   string `json:"node"`
+			Status string `json:"status"`
+		}
+		if err := get(ctx, t, "/nodes", &nodes); err != nil {
+			out = append(out, NodeUpdates{Connection: t.Name, Error: err.Error()})
+			continue
+		}
+		for _, n := range nodes {
+			if seen[n.Node] {
+				continue
+			}
+			seen[n.Node] = true
+			nu := NodeUpdates{Node: n.Node, Connection: t.Name, Packages: []AptPackage{}}
+			if n.Status != "" && n.Status != "online" {
+				nu.Error = "node is " + n.Status
+				out = append(out, nu)
+				continue
+			}
+			var ver struct {
+				Version string `json:"version"`
+				Release string `json:"release"`
+			}
+			if get(ctx, t, "/nodes/"+n.Node+"/version", &ver) == nil {
+				nu.PVEVersion = ver.Version
+			}
+			if err := get(ctx, t, "/nodes/"+n.Node+"/apt/update", &nu.Packages); err != nil {
+				nu.Error = err.Error()
+			}
+			out = append(out, nu)
+		}
+	}
+	return out
+}

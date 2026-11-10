@@ -31,6 +31,7 @@ import (
 	"github.com/bentonraymer/labdash/internal/pushover"
 	"github.com/bentonraymer/labdash/internal/scanner"
 	"github.com/bentonraymer/labdash/internal/secrets"
+	"github.com/bentonraymer/labdash/internal/updates"
 	"github.com/bentonraymer/labdash/internal/vuln"
 	"github.com/bentonraymer/labdash/web"
 )
@@ -137,6 +138,7 @@ func run() error {
 		NPM:          npm.New(),
 		GLiNet:       glinet.New(),
 		Vuln:         vulnSvc,
+		Updates:      updates.NewChecker(database, hub),
 		Secrets:      box,
 		Icons:        iconCache,
 		Web:          dist,
@@ -158,6 +160,25 @@ func run() error {
 	go dispatcher.Run(ctx)
 	go scan.Run(ctx)
 	go vulnSvc.Run(ctx)
+	srv.Updates.GitHub.Token = srv.GitHubToken
+	srv.Updates.Proxmox = func(ctx context.Context) []proxmox.Target {
+		t, enabled, err := srv.ProxmoxLoader(ctx)
+		if err != nil || !enabled {
+			return nil
+		}
+		return t
+	}
+	srv.Updates.DigestOn = func(ctx context.Context) bool {
+		return settingOn(ctx, database, "updates_digest", true) && !settingOn(ctx, database, "alerts_paused", false)
+	}
+	srv.Updates.Digest = func(ctx context.Context, title, body string) {
+		m := pushover.Message{Title: title, Body: body, HTML: true}
+		if base := pushAlerts.BaseURL(ctx); base != "" {
+			m.URL, m.URLTitle = base+"/updates", "Open updates"
+		}
+		dispatcher.SendDirect(ctx, m)
+	}
+	go srv.Updates.Run(ctx)
 
 	// Background housekeeping.
 	go func() {

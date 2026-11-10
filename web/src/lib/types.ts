@@ -24,6 +24,7 @@ export interface Settings {
   tile_glow: boolean;
   open_new_tab: boolean;
   vuln_enabled: boolean;
+  updates_digest: boolean;
   vuln_alert_min: "critical" | "high" | "medium" | "low" | "off";
 }
 
@@ -252,7 +253,12 @@ export interface IPCheck {
   subnet?: string;
   inDhcp?: boolean;
   reserved?: boolean;
+  /** Another service already uses the port (a real conflict). */
   portOwner?: string;
+  /** Your own port note for this IP:port, not tied to a service yet. */
+  portClaim?: string;
+  /** A scan found the port open: likely what you're adding. */
+  portSeen?: { banner: string; title: string; lastSeen: string };
 }
 
 // ── Scanning ──────────────────────────────────────────────────────────────
@@ -521,6 +527,17 @@ export interface VulnScanState {
   phase: string;
   started: string;
   queued: number[];
+  /** Current step (1 config & TLS, 2 CVE matching, 3 web checks) of `steps`. */
+  step?: number;
+  steps?: number;
+  /** Percent within the current step; -1 when unknown. */
+  percent?: number;
+  stepStarted?: string;
+  detail?: string;
+  devices?: number;
+  urls?: number;
+  /** Findings so far in this scan. */
+  found?: number;
 }
 
 export interface VulnScanRun {
@@ -545,4 +562,72 @@ export interface VulnStatus {
   open?: Partial<Record<Severity, number>>;
   kev?: number;
   recent?: VulnScanRun[];
+}
+
+// ── Updates ───────────────────────────────────────────────────────────────
+
+export type UpdateSource = "auto" | "docker" | "github" | "helper" | "none";
+export type UpdateStatus = "current" | "outdated" | "unknown" | "error" | "untracked";
+
+export interface UpdateItem {
+  serviceId: number;
+  name: string;
+  icon: string;
+  source: UpdateSource;
+  dockerEndpointId: number | null;
+  container: string;
+  githubRepo: string;
+  helperSlug: string;
+  currentVersion: string;
+  ignoredVersion: string;
+  runtime: string;
+  containerName: string;
+  usedSource: "" | "docker" | "github" | "helper" | "none";
+  status: UpdateStatus;
+  runningVersion: string;
+  latestVersion: string;
+  image: string;
+  newDigest: boolean;
+  latestUrl: string;
+  releaseNotes: string;
+  publishedAt: string;
+  resolvedRepo: string;
+  detail: string;
+  error: string;
+  checkedAt: string | null;
+}
+
+export interface DockerEndpoint {
+  id: number;
+  name: string;
+  url: string;
+  hostId: number | null;
+  hostName: string;
+}
+
+export interface NodeUpdates {
+  node: string;
+  connection: string;
+  pveVersion: string;
+  packages: { package: string; oldVersion: string; version: string; title: string; priority: string }[];
+  error?: string;
+}
+
+export interface UpdatesResponse {
+  items: UpdateItem[];
+  endpoints: DockerEndpoint[];
+  hasGithubToken: boolean;
+  state?: { checking: boolean; lastRun: string; nodes: NodeUpdates[] | null; nodesAt: string };
+}
+
+export interface VulnHistoryPoint {
+  day: string;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+  kev: number;
+  /** Rebuilt from finding dates (no snapshot existed yet). */
+  estimated: boolean;
 }

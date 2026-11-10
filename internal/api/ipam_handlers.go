@@ -649,17 +649,17 @@ func (s *Server) handleIPCheck(w http.ResponseWriter, r *http.Request) {
 			if p.ServiceID != nil && *p.ServiceID == exclude {
 				continue
 			}
-			if p.Source == "scan" && (p.Open == nil || !*p.Open) {
-				continue
+			switch {
+			case p.ServiceID != nil:
+				// Another service already uses it: a real conflict.
+				out["portOwner"] = p.ServiceName
+			case p.ClaimID != nil:
+				// Your own port note with no service yet; the new service takes it over.
+				out["portClaim"] = p.Label
+			case p.Open != nil && *p.Open:
+				// Seen by a scan: most likely the very thing being added.
+				out["portSeen"] = map[string]string{"banner": p.Banner, "title": p.Title, "lastSeen": p.LastSeen}
 			}
-			who := p.ServiceName
-			if who == "" {
-				who = p.Label
-			}
-			if who == "" && p.Source == "scan" {
-				who = "an open port found by a scan"
-			}
-			out["portOwner"] = who
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
