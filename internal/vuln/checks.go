@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -107,7 +108,14 @@ func (n Nuclei) UpdateTemplates(ctx context.Context) error {
 }
 
 // Run scans the URLs with safe templates (severity low and up).
-func (n Nuclei) Run(ctx context.Context, urls []string) ([]Finding, error) {
+// Progress is reported while a check runs.
+type Progress struct {
+	Percent float64 // 0-100 within the step, -1 when unknown
+	Detail  string
+	Matched int // findings so far (Nuclei only)
+}
+
+func (n Nuclei) Run(ctx context.Context, urls []string, onProgress func(Progress)) ([]Finding, error) {
 	if len(urls) == 0 {
 		return nil, nil
 	}
@@ -133,22 +141,85 @@ func (n Nuclei) Run(ctx context.Context, urls []string) ([]Finding, error) {
 		"-ni", // no interactsh: never call out to external OAST servers
 		// Global limit across all hosts; modest for a LAN.
 		"-rate-limit", "150", "-c", "25", "-timeout", "8", "-retries", "1",
+		"-stats", "-sj", "-si", "3", // JSON progress on stderr every 3s
 	}
 	cmd := exec.CommandContext(ctx, n.Binary, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
 	}
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	var errTail []string
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sc := bufio.NewScanner(stderr)
+		sc.Buffer(make([]byte, 64*1024), 1024*1024)
+		for sc.Scan() {
+			line := sc.Text()
+			if p, ok := parseNucleiStats(line); ok {
+				if onProgress != nil {
+					onProgress(p)
+				}
+				continue
+			}
+			if strings.TrimSpace(line) != "" {
+				errTail = append(errTail, line)
+				if len(errTail) > 20 {
+					errTail = errTail[1:]
+				}
+			}
+		}
+	}()
 	findings, perr := ParseNucleiJSONL(stdout)
+	<-done
 	if err := cmd.Wait(); err != nil && ctx.Err() == nil && len(findings) == 0 {
-		return nil, fmt.Errorf("nuclei: %s", lastLine(stderr.String(), err))
+		return nil, fmt.Errorf("nuclei: %s", lastLine(strings.Join(errTail, "\n"), err))
 	}
 	return findings, perr
+}
+
+// parseNucleiStats reads one `-stats -sj` line (values are strings).
+func parseNucleiStats(line string) (Progress, bool) {
+	if !strings.HasPrefix(strings.TrimSpace(line), "{") {
+		return Progress{}, false
+	}
+	var raw map[string]any
+	if json.Unmarshal([]byte(line), &raw) != nil {
+		return Progress{}, false
+	}
+	num := func(k string) float64 {
+		switch v := raw[k].(type) {
+		case string:
+			f, _ := strconv.ParseFloat(v, 64)
+			return f
+		case float64:
+			return v
+		}
+		return 0
+	}
+	if _, ok := raw["percent"]; !ok {
+		return Progress{}, false
+	}
+	p := Progress{Percent: num("percent"), Matched: int(num("matched"))}
+	p.Detail = fmt.Sprintf("%s / %s requests · %d templates · %.0f req/s",
+		humanInt(num("requests")), humanInt(num("total")), int(num("templates")), num("rps"))
+	return p, true
+}
+
+func humanInt(f float64) string {
+	n := int64(f)
+	s := strconv.FormatInt(n, 10)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
 }
 
 // ParseNucleiJSONL converts nuclei -jsonl output to findings.
@@ -434,8 +505,53 @@ func lastLine(s string, err error) string {
 	return err.Error()
 }
 
+var (
+	nmapPctRe   = regexp.MustCompile(`^(.+?) Timing: About ([\d.]+)% done`)
+	nmapPhaseRe = regexp.MustCompile(`^Initiating (.+?) at \d`)
+)
+
+// nmapProgress turns nmap's per-phase progress into one 0-100 figure:
+// port check 0-20, service versions 20-50, NSE checks 50-100.
+type nmapProgress struct {
+	hosts   int
+	phase   string
+	best    float64
+	scanned bool // a port scan has started (earlier NSE lines are pre-scan)
+}
+
+func (n *nmapProgress) line(raw string) (Progress, bool) {
+	line := strings.TrimSpace(raw)
+	pct := -1.0
+	if m := nmapPctRe.FindStringSubmatch(line); m != nil {
+		n.phase = m[1]
+		pct, _ = strconv.ParseFloat(m[2], 64)
+	} else if m := nmapPhaseRe.FindStringSubmatch(line); m != nil {
+		n.phase, pct = m[1], 0
+	} else {
+		return Progress{}, false
+	}
+	lo, span, label := 0.0, 20.0, "Checking open ports"
+	switch ph := strings.ToLower(n.phase); {
+	case strings.Contains(ph, "service"):
+		n.scanned = true
+		lo, span, label = 20, 30, "Identifying service versions"
+	case strings.Contains(ph, "nse") || strings.Contains(ph, "script"):
+		if !n.scanned { // script pre-scan before any port is checked
+			pct = 0
+			break
+		}
+		lo, span, label = 50, 50, "Running TLS & config checks"
+	case strings.Contains(ph, "scan"):
+		n.scanned = true
+	}
+	if overall := lo + span*pct/100; overall > n.best {
+		n.best = overall
+	}
+	return Progress{Percent: n.best, Detail: fmt.Sprintf("%s on %d device%s", label, n.hosts, map[bool]string{true: "", false: "s"}[n.hosts == 1])}, true
+}
+
 // RunConfigScan runs safe NSE scripts plus -sV on the given ports.
-func RunConfigScan(ctx context.Context, targets map[string][]int, now time.Time) ([]Finding, []ServiceInfo, error) {
+func RunConfigScan(ctx context.Context, targets map[string][]int, now time.Time, onProgress func(Progress)) ([]Finding, []ServiceInfo, error) {
 	if len(targets) == 0 {
 		return nil, nil, nil
 	}
@@ -462,11 +578,30 @@ func RunConfigScan(ctx context.Context, targets map[string][]int, now time.Time)
 	}
 	tmp.Close()
 	defer os.Remove(tmp.Name())
-	args := append([]string{"-Pn", "-sV", "--version-light", "-T4", "--host-timeout", "20m",
+	args := append([]string{"-Pn", "-sV", "--version-light", "-T4", "--host-timeout", "20m", "--stats-every", "3s", "-v",
 		"--script", strings.Join(ConfigScripts, ","), "-p", "T:" + strings.Join(ports, ","), "-oX", tmp.Name()}, ips...)
 	cmd := exec.CommandContext(ctx, "nmap", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return nil, nil, fmt.Errorf("nmap: %s", lastLine(string(out), err))
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, err
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, nil, err
+	}
+	np := nmapProgress{hosts: len(ips)}
+	sc := bufio.NewScanner(stdout)
+	for sc.Scan() {
+		if p, ok := np.line(sc.Text()); ok && onProgress != nil {
+			onProgress(p)
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		return nil, nil, fmt.Errorf("nmap: %s", lastLine(stderr.String(), err))
 	}
 	f, err := os.Open(tmp.Name())
 	if err != nil {

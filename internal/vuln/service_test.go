@@ -34,7 +34,8 @@ func TestScanTarget(t *testing.T) {
 
 	s := NewService(d, cve, Nuclei{}, nil)
 	var gotTargets map[string][]int
-	s.RunConfig = func(ctx context.Context, targets map[string][]int, now time.Time) ([]Finding, []ServiceInfo, error) {
+	s.RunConfig = func(ctx context.Context, targets map[string][]int, now time.Time, onProgress func(Progress)) ([]Finding, []ServiceInfo, error) {
+		onProgress(Progress{Percent: 40, Detail: "Identifying service versions on 1 device"})
 		gotTargets = targets
 		return []Finding{{IP: "192.168.8.50", Port: 21, Source: "config", Key: "ftp-anonymous", Title: "Anonymous FTP", Severity: "high", Confidence: "high"}}, nil, nil
 	}

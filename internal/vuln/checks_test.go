@@ -1,6 +1,7 @@
 package vuln
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -75,5 +76,43 @@ func TestParseConfigXML(t *testing.T) {
 	}
 	if len(svcs) != 4 || svcs[1].Product != "OpenSSH" || len(svcs[1].CPEs) != 2 || !strings.Contains(svcs[1].Version, "Debian") {
 		t.Fatalf("services: %+v", svcs)
+	}
+}
+
+func TestParseNucleiStats(t *testing.T) {
+	p, ok := parseNucleiStats(`{"duration":"0:00:04","errors":"0","hosts":"1","matched":"2","percent":"41","requests":"852","rps":"197","templates":"1009","total":"2044"}`)
+	if !ok || p.Percent != 41 || p.Matched != 2 || p.Detail != "852 / 2,044 requests · 1009 templates · 197 req/s" {
+		t.Fatalf("got %+v %v", p, ok)
+	}
+	if _, ok := parseNucleiStats("[WRN] something"); ok {
+		t.Fatal("non-JSON line parsed as stats")
+	}
+}
+
+func TestNmapProgress(t *testing.T) {
+	n := nmapProgress{hosts: 3}
+	steps := []struct {
+		line string
+		want float64
+	}{
+		{"Initiating NSE at 09:58", 0}, // script pre-scan: not the final checks yet
+		{"Initiating Connect Scan at 09:58", 0},
+		{"Connect Scan Timing: About 50.00% done; ETC: 09:59 (0:00:03 remaining)", 10},
+		{"Initiating Service scan at 09:58", 20},
+		{"Service scan Timing: About 66.67% done; ETC: 09:59", 40},
+		{"NSE Timing: About 50.00% done; ETC: 09:59", 75},
+		{"Connect Scan Timing: About 10.00% done", 75}, // never goes backwards
+	}
+	for _, s := range steps {
+		p, ok := n.line(s.line)
+		if !ok || math.Round(p.Percent) != s.want {
+			t.Fatalf("%q: got %+v want %v", s.line, p, s.want)
+		}
+	}
+	if p, _ := n.line("NSE Timing: About 50.00% done"); p.Detail != "Running TLS & config checks on 3 devices" {
+		t.Fatalf("detail: %q", p.Detail)
+	}
+	if _, ok := n.line("Discovered open port 80/tcp on 10.0.0.1"); ok {
+		t.Fatal("unrelated line counted as progress")
 	}
 }
