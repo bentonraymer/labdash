@@ -2,7 +2,8 @@ import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import clsx from "clsx";
 import { ArrowDown, ArrowUp, BellRing, Check, ChevronRight, EyeOff, Play, Radar, Settings2, Trash2 } from "lucide-react";
-import { useAcknowledgeAll, useDeleteDevice, useDeviceEvents, useDevices, useHosts, useRunScan, useScans, useScanTargets, useUpdateDevice } from "@/lib/queries";
+import { useAcknowledgeAll, useDeleteDevice, useDeviceEvents, useDevices, useHosts, useRunScan, useScans, useScanTargets, useUpdateDevice, useIPVulns } from "@/lib/queries";
+import { FindingList, VulnCounts } from "@/components/VulnBits";
 import { deviceTypeIcon, osIcon } from "@/lib/deviceIcons";
 import type { Device } from "@/lib/types";
 import { ago, fmtDateTime } from "@/lib/time";
@@ -239,6 +240,7 @@ function DeviceRow({ device: d, open, onToggle }: { device: Device; open: boolea
           <span className={clsx("size-2 shrink-0 rounded-full", d.isUp ? "bg-up" : "border border-white/30")} title={d.isUp ? "Up" : "Not seen in last scan"} />
           <span className="font-mono">{d.ip}</span>
           {!d.acknowledged && !d.ignored && <span className="rounded bg-warn px-1 py-px text-[9px] font-bold text-bg">NEW</span>}
+          <VulnCounts counts={d.vulns} min="medium" linkTo={`/network/ips/${d.ip}`} />
         </div>
         {d.mac && <div className="pl-4 font-mono text-[10px] text-faint">{d.mac}</div>}
       </td>
@@ -309,9 +311,17 @@ function DeviceDetail({ device: d }: { device: Device }) {
   const { data: hosts = [] } = useHosts();
   const update = useUpdateDevice();
   const del = useDeleteDevice();
+  const { data: vulns = [] } = useIPVulns(d.ip);
+  const openVulns = vulns.filter((v) => v.status === "open" && v.deviceId === d.id);
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
       <div className="grid content-start gap-3">
+        {openVulns.length > 0 && (
+          <div>
+            <div className="mb-1.5 text-[11px] font-medium tracking-wide text-muted uppercase">Open vulnerabilities</div>
+            <FindingList findings={openVulns} />
+          </div>
+        )}
         <div className="overflow-hidden rounded-md border border-line">
           <table className="w-full text-xs">
             <thead className="bg-panel-2 text-muted">

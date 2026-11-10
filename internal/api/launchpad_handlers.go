@@ -28,6 +28,7 @@ type QuickLink struct {
 type Service struct {
 	ID           int64       `json:"id"`
 	SectionID    *int64      `json:"sectionId"`
+	ParentID     *int64      `json:"parentId"`
 	Name         string      `json:"name"`
 	Icon         string      `json:"icon"`
 	Description  string      `json:"description"`
@@ -49,7 +50,7 @@ type Service struct {
 }
 
 const serviceCols = `id, section_id, name, icon, description, position, dns_url, direct_scheme,
-	direct_ip, direct_port, direct_path, quick_links, tags, new_tab, archived_at`
+	direct_ip, direct_port, direct_path, quick_links, tags, new_tab, archived_at, parent_id`
 
 func scanService(sc interface{ Scan(...any) error }, mode string) (*Service, error) {
 	var sv Service
@@ -57,8 +58,9 @@ func scanService(sc interface{ Scan(...any) error }, mode string) (*Service, err
 	var sec sql.NullInt64
 	var ql, tags string
 	var archived sql.NullString
+	var parent sql.NullInt64
 	if err := sc.Scan(&sv.ID, &sec, &sv.Name, &sv.Icon, &sv.Description, &sv.Position, &sv.DNSURL,
-		&sv.DirectScheme, &sv.DirectIP, &port, &sv.DirectPath, &ql, &tags, &sv.NewTab, &archived); err != nil {
+		&sv.DirectScheme, &sv.DirectIP, &port, &sv.DirectPath, &ql, &tags, &sv.NewTab, &archived, &parent); err != nil {
 		return nil, err
 	}
 	if sec.Valid {
@@ -66,6 +68,9 @@ func scanService(sc interface{ Scan(...any) error }, mode string) (*Service, err
 	}
 	if archived.Valid {
 		sv.ArchivedAt = &archived.String
+	}
+	if parent.Valid {
+		sv.ParentID = &parent.Int64
 	}
 	if port.Valid {
 		p := int(port.Int64)
@@ -105,7 +110,7 @@ func (s *Server) listServices(ctx context.Context) ([]*Service, error) {
 		return nil, err
 	}
 	rows.Close() // release the connection before the next query
-	if hostings, err := s.loadHostings(ctx); err == nil {
+	if hostings, err := s.effectiveHostings(ctx); err == nil {
 		for _, sv := range out {
 			sv.Hosting = hostings[sv.ID]
 		}
@@ -355,9 +360,11 @@ type serviceInput struct {
 	Tags         *[]string    `json:"tags"`
 	NewTab       *bool        `json:"newTab"`
 	// ClearPort/ClearSection let PATCH set nullable fields to NULL.
-	Archived     *bool `json:"archived"`
-	ClearPort    bool  `json:"clearPort"`
-	ClearSection bool  `json:"clearSection"`
+	Archived     *bool  `json:"archived"`
+	ClearPort    bool   `json:"clearPort"`
+	ClearSection bool   `json:"clearSection"`
+	ParentID     *int64 `json:"parentId"`
+	ClearParent  bool   `json:"clearParent"`
 }
 
 func (in serviceInput) validate() error {
@@ -392,7 +399,7 @@ func (s *Server) getService(ctx context.Context, id int64) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	if hostings, err := s.loadHostings(ctx); err == nil {
+	if hostings, err := s.effectiveHostings(ctx); err == nil {
 		sv.Hosting = hostings[sv.ID]
 	}
 	if st, err := s.serviceStatuses(ctx); err == nil {
@@ -438,10 +445,10 @@ func (s *Server) handleCreateService(w http.ResponseWriter, r *http.Request) {
 	ql, _ := json.Marshal(derefSlice(in.QuickLinks))
 	tags, _ := json.Marshal(derefSlice(in.Tags))
 	res, err := s.DB.ExecContext(r.Context(), `INSERT INTO services
-		(section_id, name, icon, description, dns_url, direct_scheme, direct_ip, direct_port, direct_path, quick_links, tags, new_tab, position)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+		(section_id, parent_id, name, icon, description, dns_url, direct_scheme, direct_ip, direct_port, direct_path, quick_links, tags, new_tab, position)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		 (SELECT COALESCE(MAX(position), -1) + 1 FROM services WHERE section_id IS ?))`,
-		in.SectionID, strings.TrimSpace(*in.Name), deref(in.Icon, ""), deref(in.Description, ""),
+		in.SectionID, in.ParentID, strings.TrimSpace(*in.Name), deref(in.Icon, ""), deref(in.Description, ""),
 		strings.TrimSpace(deref(in.DNSURL, "")), deref(in.DirectScheme, "http"), strings.TrimSpace(deref(in.DirectIP, "")),
 		in.DirectPort, deref(in.DirectPath, ""), string(ql), string(tags), deref(in.NewTab, true), in.SectionID)
 	if err != nil {
@@ -474,6 +481,12 @@ func (s *Server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if in.ParentID != nil && !in.ClearParent {
+		if err := s.checkParent(r.Context(), id, *in.ParentID); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	var ql, tags *string
 	if in.QuickLinks != nil {
 		b, _ := json.Marshal(*in.QuickLinks)
@@ -487,6 +500,7 @@ func (s *Server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := s.DB.ExecContext(r.Context(), `UPDATE services SET
 		section_id    = CASE WHEN ? THEN NULL ELSE COALESCE(?, section_id) END,
+		parent_id     = CASE WHEN ? THEN NULL ELSE COALESCE(?, parent_id) END,
 		name          = COALESCE(?, name),
 		icon          = COALESCE(?, icon),
 		description   = COALESCE(?, description),
@@ -501,7 +515,7 @@ func (s *Server) handleUpdateService(w http.ResponseWriter, r *http.Request) {
 		archived_at   = CASE WHEN ? IS NULL THEN archived_at WHEN ? THEN COALESCE(archived_at, ?) ELSE NULL END,
 		updated_at    = ?
 		WHERE id = ?`,
-		in.ClearSection, in.SectionID, trimPtr(in.Name), in.Icon, in.Description, trimPtr(in.DNSURL), in.DirectScheme,
+		in.ClearSection, in.SectionID, in.ClearParent, in.ParentID, trimPtr(in.Name), in.Icon, in.Description, trimPtr(in.DNSURL), in.DirectScheme,
 		trimPtr(in.DirectIP), in.ClearPort, in.DirectPort, in.DirectPath, ql, tags, in.NewTab, in.Archived, in.Archived, now(), now(), id)
 	if err != nil {
 		serverErr(w, err)
@@ -603,4 +617,83 @@ func trimPtr(p *string) *string {
 	}
 	v := strings.TrimSpace(*p)
 	return &v
+}
+
+// ── service hierarchy ─────────────────────────────────────────────────────
+
+// checkParent rejects a parent that is the service itself or one of its
+// descendants (which would make a loop).
+func (s *Server) checkParent(ctx context.Context, id, parent int64) error {
+	if parent == id {
+		return errors.New("a service can't run under itself")
+	}
+	cur := parent
+	for depth := 0; depth < 32; depth++ {
+		var p sql.NullInt64
+		if err := s.DB.QueryRowContext(ctx, `SELECT parent_id FROM services WHERE id = ?`, cur).Scan(&p); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errors.New("parent service not found")
+			}
+			return err
+		}
+		if !p.Valid {
+			return nil
+		}
+		if p.Int64 == id {
+			return errors.New("that would put the service under one of its own children")
+		}
+		cur = p.Int64
+	}
+	return errors.New("service hierarchy is too deep")
+}
+
+// effectiveHostings returns each service's hosting. A service with no
+// hosting of its own inherits its nearest ancestor's (marked Inherited,
+// with ViaService naming that ancestor).
+func (s *Server) effectiveHostings(ctx context.Context) (map[int64]*Hosting, error) {
+	own, err := s.loadHostings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.QueryContext(ctx, `SELECT id, parent_id, name FROM services`)
+	if err != nil {
+		return nil, err
+	}
+	parent := map[int64]int64{}
+	name := map[int64]string{}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		var p sql.NullInt64
+		var n string
+		if rows.Scan(&id, &p, &n) == nil {
+			ids = append(ids, id)
+			name[id] = n
+			if p.Valid {
+				parent[id] = p.Int64
+			}
+		}
+	}
+	rows.Close()
+	out := make(map[int64]*Hosting, len(ids))
+	for k, v := range own {
+		out[k] = v
+	}
+	for _, id := range ids {
+		if own[id] != nil {
+			continue
+		}
+		cur, ok := parent[id]
+		for depth := 0; ok && depth < 32; depth++ {
+			if h := own[cur]; h != nil {
+				inh := *h
+				inh.Inherited = true
+				inh.ViaService = name[cur]
+				out[id] = &inh
+				break
+			}
+			cur, ok = parent[cur]
+		}
+	}
+	return out, nil
 }

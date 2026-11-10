@@ -211,14 +211,15 @@ func syncPorts(ctx context.Context, tx *sql.Tx, deviceID int64, ports []Port, no
 	for _, p := range ports {
 		k := fmt.Sprintf("%d/%s", p.Port, p.Proto)
 		cur[k] = true
-		if _, err := tx.ExecContext(ctx, `INSERT INTO device_ports(device_id, port, proto, state, service_name, product, version, http_title, favicon, last_seen)
-			VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO device_ports(device_id, port, proto, state, service_name, product, version, http_title, favicon, last_seen, cpe)
+			VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(device_id, port, proto) DO UPDATE SET state = 'open', service_name = excluded.service_name,
 			  product = excluded.product, version = excluded.version,
+			  cpe = CASE WHEN excluded.cpe != '' THEN excluded.cpe ELSE cpe END,
 			  http_title = CASE WHEN excluded.http_title != '' THEN excluded.http_title ELSE http_title END,
 			  favicon = CASE WHEN excluded.favicon != '' THEN excluded.favicon ELSE favicon END,
 			  last_seen = excluded.last_seen`,
-			deviceID, p.Port, p.Proto, p.Service, p.Product, strings.TrimSpace(p.Version), p.Title, p.Favicon, now); err != nil {
+			deviceID, p.Port, p.Proto, p.Service, p.Product, strings.TrimSpace(p.Version), p.Title, p.Favicon, now, p.CPE); err != nil {
 			return err
 		}
 		if recordEvents && !prev[k] {

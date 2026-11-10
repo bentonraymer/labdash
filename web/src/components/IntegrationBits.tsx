@@ -65,7 +65,7 @@ export function useServiceGuest() {
     const h = s.hosting.hostId ? hostById.get(s.hosting.hostId) : undefined;
     if (h?.vmid) return pve.guest(h.vmid, h.nodeName);
     // Bare metal on a Proxmox node: the service is the node.
-    if (h && s.hosting.runtime === "bare_metal" && h.kind === "proxmox_node") return pve.byNode.get(h.name.toLowerCase());
+    if (h && s.hosting.runtime === "bare_metal" && !s.hosting.inherited && h.kind === "proxmox_node") return pve.byNode.get(h.name.toLowerCase());
     return undefined;
   };
 }

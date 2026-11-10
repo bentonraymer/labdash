@@ -3,12 +3,13 @@ import { Link, useParams } from "react-router";
 import clsx from "clsx";
 import { ArrowLeft, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { useDeletePortClaim, useIPDetail, useLaunchpad, useSavePortClaim } from "@/lib/queries";
+import { useDeletePortClaim, useIPDetail, useIPVulns, useLaunchpad, useSavePortClaim } from "@/lib/queries";
 import { ServiceIcon } from "@/components/ServiceIcon";
 import { PageHeader } from "../AdminLayout";
 import { WakeButton } from "@/components/HostActions";
 import { RouterReserve } from "@/components/RouterBits";
 import { cellStyle, stateLabel } from "./ipStyles";
+import { FindingList } from "@/components/VulnBits";
 
 const sourceLabel = { service: "Service", claim: "Claimed", scan: "Scan only" } as const;
 
@@ -132,7 +133,8 @@ export function IPDetailPage() {
               </tbody>
             </table>
           </div>
-          {!scanned && <p className="text-xs text-faint">Open/closed status appears once network scanning (build phase 5) has scanned this address.</p>}
+          {!scanned && <p className="text-xs text-faint">Open/closed status appears once a network scan has covered this address.</p>}
+          <IPVulns ip={ip} />
         </div>
 
         <aside className="grid content-start gap-4">
@@ -181,5 +183,29 @@ export function IPDetailPage() {
         </aside>
       </div>
     </>
+  );
+}
+
+/** Findings for this address: open first, then the rest (collapsed). */
+function IPVulns({ ip }: { ip: string }) {
+  const { data = [] } = useIPVulns(ip);
+  const [showAll, setShowAll] = useState(false);
+  if (data.length === 0) return null;
+  const open = data.filter((f) => f.status === "open");
+  const rest = data.filter((f) => f.status !== "open");
+  return (
+    <div className="grid gap-2">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold">Vulnerabilities</h2>
+        <span className="text-xs text-muted">{open.length} open</span>
+        {rest.length > 0 && (
+          <button className="ml-auto text-xs text-accent hover:underline" onClick={() => setShowAll(!showAll)}>
+            {showAll ? "Hide" : "Show"} {rest.length} fixed / accepted / ignored
+          </button>
+        )}
+      </div>
+      {open.length > 0 ? <FindingList findings={open} /> : <p className="text-xs text-up">No open findings.</p>}
+      {showAll && rest.length > 0 && <FindingList findings={rest} />}
+    </div>
   );
 }

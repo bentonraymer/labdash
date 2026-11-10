@@ -35,6 +35,8 @@ var settingSpecs = map[string]settingSpec{
 	"alert_flap_protection": {true, isBool},
 	"tile_glow":             {true, isBool},
 	"open_new_tab":          {true, isBool},
+	"vuln_enabled":          {true, isBool},
+	"vuln_alert_min":        {"high", oneOf("critical", "high", "medium", "low", "off")},
 }
 
 func (s *Server) loadSettings(ctx context.Context) (map[string]any, error) {

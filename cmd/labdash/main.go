@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -29,6 +31,7 @@ import (
 	"github.com/bentonraymer/labdash/internal/pushover"
 	"github.com/bentonraymer/labdash/internal/scanner"
 	"github.com/bentonraymer/labdash/internal/secrets"
+	"github.com/bentonraymer/labdash/internal/vuln"
 	"github.com/bentonraymer/labdash/web"
 )
 
@@ -102,6 +105,26 @@ func run() error {
 			dispatcher.SendDirect(ctx, alerts.NewDevicesMessage(devs, pushAlerts.BaseURL(ctx)))
 		}
 	})
+	// Vulnerability scanning: the CVE mirror lives in its own file (it's
+	// re-downloadable, so it's left out of backups).
+	cveDB, err := vuln.OpenDB(filepath.Join(cfg.DataDir, "cve.db"))
+	if err != nil {
+		return fmt.Errorf("open CVE database: %w", err)
+	}
+	defer cveDB.Close()
+	vulnSvc := vuln.NewService(database, cveDB, vuln.Nuclei{Binary: "nuclei", TemplatesDir: filepath.Join(cfg.DataDir, "nuclei-templates")}, hub)
+	vulnSvc.Enabled = func(ctx context.Context) bool { return settingOn(ctx, database, "vuln_enabled", true) }
+	vulnSvc.AlertMin = func(ctx context.Context) string { return settingString(ctx, database, "vuln_alert_min", "high") }
+	vulnSvc.Alert = func(ctx context.Context, title, body string) {
+		if settingOn(ctx, database, "alerts_paused", false) {
+			return
+		}
+		m := pushover.Message{Title: title, Body: body, HTML: true}
+		if base := pushAlerts.BaseURL(ctx); base != "" {
+			m.URL, m.URLTitle = base+"/network/vulns", "Open vulnerabilities"
+		}
+		dispatcher.SendDirect(ctx, m)
+	}
 	srv := &api.Server{
 		DB:           database,
 		Cfg:          cfg,
@@ -113,6 +136,7 @@ func run() error {
 		Scanner:      scan,
 		NPM:          npm.New(),
 		GLiNet:       glinet.New(),
+		Vuln:         vulnSvc,
 		Secrets:      box,
 		Icons:        iconCache,
 		Web:          dist,
@@ -133,6 +157,7 @@ func run() error {
 	go engine.Run(ctx)
 	go dispatcher.Run(ctx)
 	go scan.Run(ctx)
+	go vulnSvc.Run(ctx)
 
 	// Background housekeeping.
 	go func() {
@@ -209,6 +234,19 @@ func nightlyBackups(ctx context.Context, db *sql.DB, dataDir string) {
 			slog.Info("nightly backup written", "file", name)
 		}
 	}
+}
+
+// settingString reads a string setting (stored as JSON), falling back to def.
+func settingString(ctx context.Context, db *sql.DB, key, def string) string {
+	var raw string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM settings WHERE key = ?`, key).Scan(&raw); err != nil {
+		return def
+	}
+	var v string
+	if json.Unmarshal([]byte(raw), &v) != nil || v == "" {
+		return def
+	}
+	return v
 }
 
 // settingNumber reads a numeric setting, falling back to def when unset.

@@ -20,10 +20,15 @@ type ScanTarget struct {
 	CustomPorts string  `json:"customPorts"`
 	Enabled     bool    `json:"enabled"`
 	LastRunAt   *string `json:"lastRunAt"`
+	// Vulnerability scanning (pointers: omitted fields keep their value)
+	VulnEnabled  *bool   `json:"vulnEnabled"`
+	VulnSchedule *string `json:"vulnSchedule"`
+	VulnLastRun  *string `json:"vulnLastRun"`
 }
 
 func (s *Server) handleListScanTargets(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.DB.QueryContext(r.Context(), `SELECT id, cidr, name, schedule, port_profile, custom_ports, enabled, last_run_at FROM scan_targets ORDER BY cidr`)
+	rows, err := s.DB.QueryContext(r.Context(), `SELECT id, cidr, name, schedule, port_profile, custom_ports, enabled, last_run_at,
+		vuln_enabled, vuln_schedule, vuln_last_run FROM scan_targets ORDER BY cidr`)
 	if err != nil {
 		serverErr(w, err)
 		return
@@ -32,14 +37,20 @@ func (s *Server) handleListScanTargets(w http.ResponseWriter, r *http.Request) {
 	out := []ScanTarget{}
 	for rows.Next() {
 		var t ScanTarget
-		var last sql.NullString
-		if err := rows.Scan(&t.ID, &t.CIDR, &t.Name, &t.Schedule, &t.PortProfile, &t.CustomPorts, &t.Enabled, &last); err != nil {
+		var last, vlast sql.NullString
+		var ven bool
+		var vsched string
+		if err := rows.Scan(&t.ID, &t.CIDR, &t.Name, &t.Schedule, &t.PortProfile, &t.CustomPorts, &t.Enabled, &last, &ven, &vsched, &vlast); err != nil {
 			serverErr(w, err)
 			return
 		}
 		if last.Valid {
 			t.LastRunAt = &last.String
 		}
+		if vlast.Valid {
+			t.VulnLastRun = &vlast.String
+		}
+		t.VulnEnabled, t.VulnSchedule = &ven, &vsched
 		out = append(out, t)
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -71,6 +82,14 @@ func (s *Server) handleSaveScanTarget(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid schedule: "+err.Error())
 		return
 	}
+	if in.VulnSchedule != nil {
+		v := strings.TrimSpace(*in.VulnSchedule)
+		if err := scanner.ValidateSchedule(v); err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid vulnerability schedule: "+err.Error())
+			return
+		}
+		in.VulnSchedule = &v
+	}
 	if in.PortProfile == "" {
 		in.PortProfile = "top1000"
 	}
@@ -92,6 +111,10 @@ func (s *Server) handleSaveScanTarget(w http.ResponseWriter, r *http.Request) {
 		}
 		in.ID, _ = res.LastInsertId()
 		status = http.StatusCreated
+		if err := s.saveVulnTarget(r, in.ID, in); err != nil {
+			serverErr(w, err)
+			return
+		}
 	} else {
 		id, perr := idParam(r)
 		if perr != nil {
@@ -103,8 +126,18 @@ func (s *Server) handleSaveScanTarget(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		in.ID = id
+		if err := s.saveVulnTarget(r, id, in); err != nil {
+			serverErr(w, err)
+			return
+		}
 	}
 	writeJSON(w, status, map[string]int64{"id": in.ID})
+}
+
+func (s *Server) saveVulnTarget(r *http.Request, id int64, in ScanTarget) error {
+	_, err := s.DB.ExecContext(r.Context(), `UPDATE scan_targets SET vuln_enabled = COALESCE(?, vuln_enabled), vuln_schedule = COALESCE(?, vuln_schedule) WHERE id = ?`,
+		in.VulnEnabled, in.VulnSchedule, id)
+	return err
 }
 
 func (s *Server) handleDeleteScanTarget(w http.ResponseWriter, r *http.Request) {
@@ -202,6 +235,8 @@ type Device struct {
 	Host         *DeviceRef   `json:"host"`
 	Services     []DeviceRef  `json:"services"`
 	Ports        []DevicePort `json:"ports"`
+	// Open vulnerability findings by severity (critical/high/medium/low/info).
+	Vulns map[string]int `json:"vulns"`
 }
 
 func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {
@@ -246,6 +281,26 @@ func (s *Server) handleListDevices(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&id, &p.Port, &p.Proto, &p.State, &p.Service, &p.Product, &p.Version, &p.Title, &p.Favicon, &p.LastSeen); err == nil {
 			if d, ok := byID[id]; ok {
 				d.Ports = append(d.Ports, p)
+			}
+		}
+	}
+	rows.Close()
+
+	rows, err = s.DB.QueryContext(ctx, `SELECT device_id, severity, COUNT(*) FROM vuln_findings WHERE status = 'open' GROUP BY device_id, severity`)
+	if err != nil {
+		serverErr(w, err)
+		return
+	}
+	for rows.Next() {
+		var id int64
+		var sev string
+		var n int
+		if rows.Scan(&id, &sev, &n) == nil {
+			if d, ok := byID[id]; ok {
+				if d.Vulns == nil {
+					d.Vulns = map[string]int{}
+				}
+				d.Vulns[sev] = n
 			}
 		}
 	}

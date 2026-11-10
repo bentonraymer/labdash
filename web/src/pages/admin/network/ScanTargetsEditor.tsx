@@ -20,8 +20,15 @@ const schedules = [
   { v: "0 3 * * 0", label: "Weekly (Sun 3am)" },
 ];
 
-type Draft = Omit<ScanTarget, "id" | "lastRunAt"> & { id?: number };
-const blank: Draft = { cidr: "", name: "", schedule: "0 */6 * * *", portProfile: "top1000", customPorts: "", enabled: true };
+const vulnSchedules = [
+  { v: "", label: "Manual only" },
+  { v: "0 4 * * *", label: "Daily 4am" },
+  { v: "0 4 * * 0", label: "Weekly (Sun 4am)" },
+  { v: "0 4 1 * *", label: "Monthly (1st, 4am)" },
+];
+
+type Draft = Omit<ScanTarget, "id" | "lastRunAt" | "vulnLastRun"> & { id?: number };
+const blank: Draft = { cidr: "", name: "", schedule: "0 */6 * * *", portProfile: "top1000", customPorts: "", enabled: true, vulnEnabled: true, vulnSchedule: "0 4 * * 0" };
 
 /** Manage the subnets the scanner covers, their schedules and port profiles. */
 export function ScanTargetsEditor({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -50,8 +57,10 @@ export function ScanTargetsEditor({ open, onClose }: { open: boolean; onClose: (
               <span className="text-muted">{t.name}</span>
               <span className="ml-auto text-xs text-faint">
                 {schedules.find((s) => s.v === t.schedule)?.label ?? `cron ${t.schedule}`} · {profiles.find((p) => p.id === t.portProfile)?.label} · last {ago(t.lastRunAt)}
+                <br />
+                Vulns: {t.vulnEnabled === false ? "off" : `${vulnSchedules.find((s) => s.v === t.vulnSchedule)?.label ?? `cron ${t.vulnSchedule}`} · last ${ago(t.vulnLastRun ?? null)}`}
               </span>
-              <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setDraft({ ...t })}>
+              <button className="btn-ghost px-2 py-1 text-xs" onClick={() => setDraft({ cidr: t.cidr, name: t.name, schedule: t.schedule, portProfile: t.portProfile, customPorts: t.customPorts, enabled: t.enabled, vulnEnabled: t.vulnEnabled ?? true, vulnSchedule: t.vulnSchedule ?? "0 4 * * 0", id: t.id })}>
                 Edit
               </button>
               <button className="btn-ghost p-1" title="Delete" onClick={() => confirm(`Stop scanning ${t.cidr}? Devices already found are kept.`) && del.mutate(t.id)}>
@@ -123,6 +132,29 @@ export function ScanTargetsEditor({ open, onClose }: { open: boolean; onClose: (
                   <input className="input font-mono" value={draft.schedule} onChange={(e) => set("schedule", e.target.value)} />
                 </div>
               )}
+            </div>
+            <div className="grid grid-cols-[auto_1fr] items-end gap-3 rounded-md border border-line p-3">
+              <label className="flex items-center gap-2 pb-2 text-sm text-muted">
+                <input type="checkbox" className="accent-accent" checked={draft.vulnEnabled ?? true} onChange={(e) => set("vulnEnabled", e.target.checked)} />
+                Vulnerability scans
+              </label>
+              <div>
+                <label className="label">Vulnerability schedule</label>
+                <select
+                  className="input"
+                  disabled={draft.vulnEnabled === false}
+                  value={vulnSchedules.some((s) => s.v === draft.vulnSchedule) ? draft.vulnSchedule : "custom"}
+                  onChange={(e) => e.target.value !== "custom" && set("vulnSchedule", e.target.value)}
+                >
+                  {vulnSchedules.map((s) => (
+                    <option key={s.v} value={s.v}>
+                      {s.label}
+                    </option>
+                  ))}
+                  {!vulnSchedules.some((s) => s.v === draft.vulnSchedule) && <option value="custom">cron {draft.vulnSchedule}</option>}
+                </select>
+              </div>
+              <p className="col-span-2 text-[11px] text-faint">Checks the open ports found by the network scan for known CVEs, web issues and weak TLS. Safe checks only.</p>
             </div>
             <label className="flex items-center gap-2 text-sm text-muted">
               <input type="checkbox" className="accent-accent" checked={draft.enabled} onChange={(e) => set("enabled", e.target.checked)} />

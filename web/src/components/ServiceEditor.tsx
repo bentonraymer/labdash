@@ -6,6 +6,7 @@ import { ServiceIcon } from "./ServiceIcon";
 import { IconPicker } from "./IconPicker";
 import { useDeleteService, useHosts, useLaunchpad, useSaveDeployment, useSaveMonitor, useSaveService } from "@/lib/queries";
 import { NPMPanel } from "./NPMPanel";
+import { ParentPicker } from "./ParentPicker";
 import { HostingFields, hostingFromService, hostingToInput, type HostingForm } from "./HostingFields";
 import { slugifyIconName } from "@/lib/icons";
 import type { QuickLink, Service } from "@/lib/types";
@@ -88,6 +89,7 @@ export function ServiceEditor({
     }
   };
   const [hosting, setHosting] = useState<HostingForm>(hostingFromService(null));
+  const [parentId, setParentId] = useState("");
   const domain = data?.settings.dns_domain || "";
 
   useEffect(() => {
@@ -96,7 +98,9 @@ export function ServiceEditor({
     setDnsTouched(!!service?.dnsUrl);
     setPickerOpen(false);
     setAddMonitor(true);
-    setHosting(hostingFromService(service?.hosting));
+    // Inherited hosting belongs to the parent; only edit the service's own.
+    setHosting(hostingFromService(service?.hosting?.inherited ? null : service?.hosting));
+    setParentId(service?.parentId ? String(service.parentId) : "");
     save.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, service, defaultSectionId]);
@@ -132,12 +136,14 @@ export function ServiceEditor({
           .map((t) => t.trim())
           .filter(Boolean),
         newTab: f.newTab,
+        parentId: parentId ? Number(parentId) : null,
+        clearParent: !parentId,
         quickLinks: f.quickLinks.filter((l) => l.url.trim()).map((l) => ({ label: l.label.trim() || l.url.trim(), url: l.url.trim() })),
       },
       {
         onSuccess: (saved) => {
           const dep = hostingToInput(hosting);
-          if (JSON.stringify(dep) !== JSON.stringify(hostingToInput(hostingFromService(service?.hosting)))) {
+          if (JSON.stringify(dep) !== JSON.stringify(hostingToInput(hostingFromService(service?.hosting?.inherited ? null : service?.hosting)))) {
             saveDeployment.mutate({ serviceId: saved.id, deployment: dep });
           }
           if (!service && addMonitor && (f.dnsUrl.trim() || f.directIp.trim())) {
@@ -305,6 +311,14 @@ export function ServiceEditor({
 
         <fieldset className="rounded-lg border border-line p-4">
           <legend className="px-1 text-xs font-semibold text-muted">Hosting</legend>
+          <div className="mb-3">
+            <ParentPicker value={parentId} onChange={setParentId} selfId={service?.id} />
+          </div>
+          {service?.hosting?.inherited && !hosting.runtime && (
+            <p className="mb-2 text-[11px] text-muted">
+              Currently inherits <b className="text-fg">{service.hosting.hostName || "its host"}</b> via <b className="text-fg">{service.hosting.viaService}</b>. Set a runtime below to override.
+            </p>
+          )}
           <HostingFields value={hosting} onChange={onHosting} />
         </fieldset>
 

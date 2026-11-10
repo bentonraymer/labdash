@@ -81,9 +81,9 @@ func (s *Server) handleServiceWizard(w http.ResponseWriter, r *http.Request) {
 	ql, _ := json.Marshal(derefSlice(svc.QuickLinks))
 	tags, _ := json.Marshal(derefSlice(svc.Tags))
 	res, err := tx.ExecContext(ctx, `INSERT INTO services
-		(section_id, name, icon, description, dns_url, direct_scheme, direct_ip, direct_port, direct_path, quick_links, tags, new_tab, position)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM services WHERE section_id IS ?))`,
-		svc.SectionID, name, deref(svc.Icon, ""), deref(svc.Description, ""), strings.TrimSpace(deref(svc.DNSURL, "")),
+		(section_id, parent_id, name, icon, description, dns_url, direct_scheme, direct_ip, direct_port, direct_path, quick_links, tags, new_tab, position)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM services WHERE section_id IS ?))`,
+		svc.SectionID, svc.ParentID, name, deref(svc.Icon, ""), deref(svc.Description, ""), strings.TrimSpace(deref(svc.DNSURL, "")),
 		deref(svc.DirectScheme, "http"), ip, svc.DirectPort, deref(svc.DirectPath, ""), string(ql), string(tags), deref(svc.NewTab, true), svc.SectionID)
 	if err != nil {
 		serverErr(w, err)

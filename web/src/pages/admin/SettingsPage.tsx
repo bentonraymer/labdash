@@ -9,6 +9,7 @@ import { DashyImport } from "./DashyImport";
 import { PushoverCard } from "./PushoverCard";
 import { GLiNetCard, NPMCard, ProxmoxCard } from "./IntegrationCards";
 import { BackupCard } from "./BackupCard";
+import { DataSources } from "./network/VulnerabilitiesPage";
 
 function Card({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
@@ -139,6 +140,22 @@ export function SettingsPage() {
 
         <Card title="GL.iNet router" description="Reserved IPs and client names from your router's LAN page">
           <GLiNetCard />
+        </Card>
+
+        <Card title="Vulnerability scanning" description="Weekly safe checks: CVEs by service version, web checks (Nuclei) and weak TLS / config">
+          <Row label="Enabled" hint="Scheduled scans plus daily CVE / template updates">
+            <Toggle checked={s.vuln_enabled} onChange={(v) => patch.mutate({ vuln_enabled: v })} />
+          </Row>
+          <Row label="Alert on new findings" hint="Pushover when a scan finds something new at or above">
+            <select className="input max-w-xs" value={s.vuln_alert_min} onChange={(e) => patch.mutate({ vuln_alert_min: e.target.value as typeof s.vuln_alert_min })}>
+              <option value="critical">Critical only</option>
+              <option value="high">High and Critical</option>
+              <option value="medium">Medium and up</option>
+              <option value="low">Everything (Low and up)</option>
+              <option value="off">Don't alert</option>
+            </select>
+          </Row>
+          <DataSources compact />
         </Card>
 
         <Card title="Backup & restore">

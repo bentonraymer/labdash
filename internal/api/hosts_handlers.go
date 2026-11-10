@@ -210,6 +210,10 @@ type Hosting struct {
 	Runtime       string `json:"runtime"`
 	VMID          *int   `json:"vmid"`
 	ContainerName string `json:"containerName"`
+	// Inherited is true when the service has no hosting of its own and runs
+	// under ViaService (its nearest ancestor that has hosting).
+	Inherited  bool   `json:"inherited"`
+	ViaService string `json:"viaService,omitempty"`
 }
 
 func (s *Server) loadHostings(ctx context.Context) (map[int64]*Hosting, error) {

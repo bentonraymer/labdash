@@ -29,6 +29,7 @@ export function ServicesPage() {
   const [node, setNode] = useState("all");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 });
 
+  const parentName = useMemo(() => new Map((data?.services ?? []).map((x) => [x.id, x.name])), [data?.services]);
   const sectionName = useMemo(() => new Map(data?.sections.map((s) => [s.id, s.name]) ?? []), [data?.sections]);
   const services = data?.services ?? [];
   const nodes = useMemo(() => [...new Set(services.map((s) => s.hosting?.nodeName).filter(Boolean) as string[])].sort(), [services]);
@@ -188,6 +189,7 @@ export function ServicesPage() {
                 Up
               </Th>
               <Th k="name">Name</Th>
+              <th className="px-3 py-2 text-left font-medium">Under</th>
               <Th k="node">Node</Th>
               <Th k="host">Host</Th>
               <Th k="runtime">Type</Th>
@@ -213,6 +215,7 @@ export function ServicesPage() {
                     <span className="font-medium whitespace-nowrap">{s.name}</span>
                   </div>
                 </td>
+                <td className="px-3 py-2 whitespace-nowrap text-muted">{s.parentId ? (parentName.get(s.parentId) ?? "—") : <span className="text-faint">—</span>}</td>
                 <td className="px-3 py-2 whitespace-nowrap text-muted">{s.hosting?.nodeName || "—"}</td>
                 <td className="px-3 py-2 whitespace-nowrap">{s.hosting?.hostName && (s.hosting.hostName !== s.hosting.nodeName || s.hosting.runtime === "bare_metal") ? s.hosting.hostName : <span className="text-faint">—</span>}</td>
                 <td className="px-3 py-2">
@@ -252,7 +255,7 @@ export function ServicesPage() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={13} className="px-3 py-10 text-center text-muted">
+                <td colSpan={14} className="px-3 py-10 text-center text-muted">
                   No services match.
                 </td>
               </tr>
