@@ -31,6 +31,7 @@ import (
 	"github.com/bentonraymer/labdash/internal/pushover"
 	"github.com/bentonraymer/labdash/internal/scanner"
 	"github.com/bentonraymer/labdash/internal/secrets"
+	"github.com/bentonraymer/labdash/internal/updates"
 	"github.com/bentonraymer/labdash/internal/vuln"
 )
 
@@ -49,6 +50,7 @@ type Server struct {
 	Proxmox      *proxmox.Poller
 	GLiNet       *glinet.Client
 	Vuln         *vuln.Service
+	Updates      *updates.Checker
 	// Restart exits the process so Docker restarts it (used to apply a restore).
 	Restart func()
 
@@ -179,8 +181,18 @@ func (s *Server) Router() http.Handler {
 			r.Post("/scan-targets/{id}/vuln-scan", s.handleRunVulnScan)
 			r.Get("/vulns", s.handleListVulns)
 			r.Get("/vulns/status", s.handleVulnStatus)
+			r.Get("/vulns/history", s.handleVulnHistory)
 			r.Post("/vulns/sync", s.handleVulnSync)
 			r.Patch("/vulns/{id}", s.handleUpdateVuln)
+			r.Get("/updates", s.handleListUpdates)
+			r.Post("/updates/check", s.handleCheckUpdates)
+			r.Put("/updates/github-token", s.handlePutGitHubToken)
+			r.Put("/updates/{id}", s.handlePutUpdateConfig)
+			r.Get("/docker-endpoints", s.handleListDockerEndpoints)
+			r.Post("/docker-endpoints", s.handleSaveDockerEndpoint)
+			r.Post("/docker-endpoints/test", s.handleTestDockerEndpoint)
+			r.Put("/docker-endpoints/{id}", s.handleSaveDockerEndpoint)
+			r.Delete("/docker-endpoints/{id}", s.handleDeleteDockerEndpoint)
 			r.Get("/devices", s.handleListDevices)
 			r.Post("/devices/acknowledge-all", s.handleAcknowledgeAll)
 			r.Patch("/devices/{id}", s.handleUpdateDevice)

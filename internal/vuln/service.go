@@ -503,6 +503,7 @@ func (s *Service) ScanTarget(ctx context.Context, targetID int64) error {
 	if err != nil {
 		return fail(err)
 	}
+	_ = RecordHistory(ctx, s.DB, time.Now())
 	var open int
 	_ = s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM vuln_findings WHERE status = 'open' AND device_id IN (`+placeholders(len(scanned))+`)`, int64sAny(scanned)...).Scan(&open)
 	finished := time.Now().UTC().Format(tsFormat)

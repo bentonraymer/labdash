@@ -28,6 +28,10 @@ Then open `http://<host>:8080` and create the admin account.
 | **Pushover** | Down/up alerts, new-device alerts | User key + app token |
 | **Nginx Proxy Manager** | Shows whether each service's DNS name has a proxy host (and that it forwards to the right IP:port); creates missing ones from the service editor or Add Service wizard. Never edits or deletes existing hosts. | NPM admin email + password |
 | **Proxmox VE** | Read-only CPU/RAM/disk for nodes and for VMs/LXCs you link by VMID | API token with the `PVEAuditor` role |
+| **Docker hosts** | Update checks: reads each container's image and compares it with its registry (newer image for the same tag, or a newer version tag). Read-only. | None: run a [socket proxy](https://docs.linuxserver.io/images/docker-socket-proxy/) with `CONTAINERS=1 IMAGES=1 POST=0` on each host (Settings → Docker hosts has a compose file) |
+| **GitHub** | Latest releases and release notes for the Updates page, including Proxmox Helper Script apps | Optional token (no scopes) to raise the 60 lookups/hour limit |
+
+Pending Proxmox node updates on the Updates page need the API token to have `Sys.Modify` on `/nodes` (Proxmox's own requirement for listing updates). Without it, the page shows a note instead.
 
 Credentials are encrypted with `LABDASH_SECRET`.
 

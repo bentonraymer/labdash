@@ -7,6 +7,7 @@ import type { ScanTarget, Severity, VulnFinding, VulnScanState, VulnStatusKind }
 import { ago, duration, fmtDateTime } from "@/lib/time";
 import { FindingList, sevStyle, severities, sourceLabel } from "@/components/VulnBits";
 import { PageHeader } from "../AdminLayout";
+import { VulnHistoryChart } from "./VulnHistoryChart";
 
 const statusTabs: { id: VulnStatusKind | "all"; label: string }[] = [
   { id: "open", label: "Open" },
@@ -102,6 +103,8 @@ export function VulnerabilitiesPage() {
             <div className="text-xs text-muted">Last scan{lastScan ? ` · ${lastScan.devices} devices` : ""}</div>
           </div>
         </div>
+
+        <VulnHistoryChart />
 
         {lastScan?.notes && (
           <div className="grid gap-1 rounded-lg border border-warn/30 bg-warn/5 px-4 py-2.5 text-xs text-warn">

@@ -10,6 +10,7 @@ import { PushoverCard } from "./PushoverCard";
 import { GLiNetCard, NPMCard, ProxmoxCard } from "./IntegrationCards";
 import { BackupCard } from "./BackupCard";
 import { DataSources } from "./network/VulnerabilitiesPage";
+import { DockerHostsCard, GitHubTokenField } from "./updates/DockerHostsCard";
 
 function Card({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
   return (
@@ -156,6 +157,19 @@ export function SettingsPage() {
             </select>
           </Row>
           <DataSources compact />
+        </Card>
+
+        <Card title="Updates" description="Read-only checks for newer versions of your services and Proxmox nodes">
+          <Row label="Weekly digest" hint="Pushover summary of available updates, Monday 9am">
+            <Toggle checked={s.updates_digest} onChange={(v) => patch.mutate({ updates_digest: v })} />
+          </Row>
+          <Row label="GitHub token" hint="For release lookups">
+            <GitHubTokenField />
+          </Row>
+        </Card>
+
+        <Card title="Docker hosts" description="Read-only access to containers, for update checks">
+          <DockerHostsCard />
         </Card>
 
         <Card title="Backup & restore">

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { api } from "./api";
-import type { Bucket, RouterSettings, RouterSnapshot, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User, VulnFinding, VulnScanState, VulnStatus, VulnStatusKind } from "./types";
+import type { Bucket, RouterSettings, RouterSnapshot, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User, VulnFinding, VulnScanState, VulnStatus, VulnStatusKind, VulnHistoryPoint, UpdatesResponse, UpdateSource } from "./types";
 
 export const keys = {
   me: ["me"] as const,
@@ -17,6 +17,7 @@ export const keys = {
   subnets: ["subnets"] as const,
   devices: ["devices"] as const,
   vulns: ["vulns"] as const,
+  updates: ["updates"] as const,
   vulnStatus: ["vuln-status"] as const,
   scans: ["scans"] as const,
   scanTargets: ["scan-targets"] as const,
@@ -146,6 +147,7 @@ export function useLiveEvents(enabled: boolean) {
             qc.setQueryData<VulnStatus>(keys.vulnStatus, (prev) => (prev ? { ...prev, scan: msg.data as VulnScanState } : prev));
             if (!(msg.data as VulnScanState).running) qc.invalidateQueries({ queryKey: keys.vulnStatus });
           }
+          if (msg.type === "updates") qc.invalidateQueries({ queryKey: keys.updates });
           if (msg.type === "vulns") {
             qc.invalidateQueries({ queryKey: keys.vulns });
             qc.invalidateQueries({ queryKey: keys.vulnStatus });
@@ -392,6 +394,8 @@ export const useVulns = (status: VulnStatusKind | "all" = "open") =>
   useQuery({ queryKey: [...keys.vulns, status], queryFn: () => api.get<VulnFinding[]>(`/api/vulns?status=${status}`) });
 export const useIPVulns = (ip: string) =>
   useQuery({ queryKey: [...keys.vulns, "ip", ip], queryFn: () => api.get<VulnFinding[]>(`/api/vulns?status=all&ip=${encodeURIComponent(ip)}`), enabled: !!ip });
+export const useVulnHistory = (days: number) =>
+  useQuery({ queryKey: [...keys.vulns, "history", days], queryFn: () => api.get<VulnHistoryPoint[]>(`/api/vulns/history?days=${days}`) });
 export const useVulnStatus = (poll = false) =>
   useQuery({
     queryKey: keys.vulnStatus,
@@ -426,6 +430,48 @@ export function useVulnSync() {
     mutationFn: (body: { full?: boolean; what?: "cve" | "templates" }) => api.post("/api/vulns/sync", body),
     onSuccess: () => setTimeout(() => qc.invalidateQueries({ queryKey: keys.vulnStatus }), 500),
   });
+}
+
+// ── Updates ───────────────────────────────────────────────────────────────
+
+export const useUpdates = () => useQuery({ queryKey: keys.updates, queryFn: () => api.get<UpdatesResponse>("/api/updates"), refetchInterval: 120_000 });
+
+export function useSaveUpdateConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ serviceId, ...body }: { serviceId: number; source: UpdateSource; dockerEndpointId: number | null; container: string; githubRepo: string; helperSlug: string; currentVersion: string; ignoredVersion?: string }) =>
+      api.put(`/api/updates/${serviceId}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.updates }),
+  });
+}
+
+export function useCheckUpdates() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (serviceId?: number) => api.post("/api/updates/check", serviceId ? { serviceId } : {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.updates }),
+  });
+}
+
+export function useSaveDockerEndpoint() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id?: number; name: string; url: string; hostId: number | null }) =>
+      id ? api.put(`/api/docker-endpoints/${id}`, body) : api.post("/api/docker-endpoints", body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.updates }),
+  });
+}
+
+export function useDeleteDockerEndpoint() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: number) => api.del(`/api/docker-endpoints/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: keys.updates }) });
+}
+
+export const testDockerEndpoint = (url: string) => api.post<{ containers: number; names: string[] }>("/api/docker-endpoints/test", { url });
+
+export function useSaveGitHubToken() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (token: string) => api.put("/api/updates/github-token", { token }), onSuccess: () => qc.invalidateQueries({ queryKey: keys.updates }) });
 }
 
 export function useUpdateDevice() {
