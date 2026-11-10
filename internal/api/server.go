@@ -181,6 +181,7 @@ func (s *Server) Router() http.Handler {
 			r.Post("/scan-targets/{id}/vuln-scan", s.handleRunVulnScan)
 			r.Get("/vulns", s.handleListVulns)
 			r.Get("/vulns/status", s.handleVulnStatus)
+			r.Get("/vulns/history", s.handleVulnHistory)
 			r.Post("/vulns/sync", s.handleVulnSync)
 			r.Patch("/vulns/{id}", s.handleUpdateVuln)
 			r.Get("/updates", s.handleListUpdates)

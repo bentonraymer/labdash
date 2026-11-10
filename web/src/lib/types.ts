@@ -619,3 +619,15 @@ export interface UpdatesResponse {
   hasGithubToken: boolean;
   state?: { checking: boolean; lastRun: string; nodes: NodeUpdates[] | null; nodesAt: string };
 }
+
+export interface VulnHistoryPoint {
+  day: string;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+  kev: number;
+  /** Rebuilt from finding dates (no snapshot existed yet). */
+  estimated: boolean;
+}
