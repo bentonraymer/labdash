@@ -10,6 +10,7 @@ import { api, ApiError } from "@/lib/api";
 import { checkIP, useHosts, useLaunchpad, useNPMStatus, useRouter, useSubnets } from "@/lib/queries";
 import { CertPicker, defaultCert } from "./NPMPanel";
 import { ParentPicker } from "./ParentPicker";
+import { hostOf } from "./IntegrationBits";
 import { isMac, useMacFor } from "./RouterBits";
 import { slugifyIconName } from "@/lib/icons";
 import { runtimeLabel } from "@/lib/labels";
@@ -133,9 +134,12 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
     return () => clearTimeout(t);
   }, [ip, port]);
 
-  const customUrl = customHost.trim() ? (/^https?:\/\//i.test(customHost.trim()) ? customHost.trim() : `https://${customHost.trim()}`) : "";
+  const customRaw = customHost.trim() ? (/^https?:\/\//i.test(customHost.trim()) ? customHost.trim() : `https://${customHost.trim()}`) : "";
+  // Only a URL with a real hostname counts (it's half-typed while e.g. "https://" is entered).
+  const customUrl = hostOf(customRaw).includes(".") ? customRaw : "";
+  const customInvalid = !!customHost.trim() && !customUrl;
   const dnsUrl = dnsMode === "custom" ? customUrl : dnsMode === "wild" && useDns && sub && domain ? `https://${sub}.${domain}` : "";
-  useEffect(() => setCert(defaultCert(certs, dnsUrl ? new URL(dnsUrl).hostname : "")), [certs, dnsUrl]);
+  useEffect(() => setCert(defaultCert(certs, dnsUrl ? hostOf(dnsUrl) : "")), [certs, dnsUrl]);
   const canNPM = npmReady && !!dnsUrl && !!ip.trim() && !!port;
   // Router reservation: prefill the MAC from the host, a scan or the router.
   useEffect(() => {
@@ -150,7 +154,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   const dockerOnSharedIp = hosting.runtime === "docker" || hosting.runtime === "bare_metal";
   const portTaken = !!check?.portOwner;
 
-  const canNext = [!!name.trim(), true, !portTaken && (!!dnsUrl || !!ip.trim()) && (check?.valid ?? true) !== false, true, true][step];
+  const canNext = [!!name.trim(), true, !portTaken && !(dnsMode === "custom" && customInvalid) && (!!dnsUrl || !!ip.trim()) && (check?.valid ?? true) !== false, true, true][step];
 
   const create = async () => {
     setBusy(true);
@@ -379,6 +383,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
             {dnsMode === "custom" && (
               <>
                 <input className="input font-mono" value={customHost} onChange={(e) => setCustomHost(e.target.value)} placeholder="links.example.org  or  https://status.example.com/app" />
+                {customInvalid && <p className="mt-1 text-xs text-warn">Enter a full hostname, like links.example.org</p>}
                 <p className="mt-1 text-[11px] text-faint">Any hostname or full URL. LabDash won't touch DNS for it; NPM checks still work if NPM serves that name.</p>
               </>
             )}
@@ -481,7 +486,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
           >
             {npm && canNPM && (
               <div className="mt-2 flex items-center gap-2 text-xs text-muted">
-                SSL certificate <CertPicker certs={certs} domain={dnsUrl ? new URL(dnsUrl).hostname : ""} value={cert} onChange={setCert} />
+                SSL certificate <CertPicker certs={certs} domain={hostOf(dnsUrl)} value={cert} onChange={setCert} />
               </div>
             )}
           </Option>
