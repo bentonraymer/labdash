@@ -336,7 +336,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
               <label className="label">Path</label>
               <input className="input font-mono" value={path} onChange={(e) => setPath(e.target.value)} placeholder="/web (optional)" />
             </div>
-            <IPFeedback check={check} ip={ip} port={port} sharedIp={dockerOnSharedIp} />
+            <IPFeedback check={check} ip={ip} port={port} ownIp={hosting.runtime === "vm" || hosting.runtime === "lxc"} />
           </fieldset>
 
           <fieldset className="rounded-lg border border-line p-4">
@@ -525,22 +525,34 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   );
 }
 
-function IPFeedback({ check, ip, port, sharedIp }: { check: IPCheck | null; ip: string; port: string; sharedIp: boolean }) {
+/** ownIp: the service is a VM / LXC, which needs an address of its own. */
+function IPFeedback({ check, ip, port, ownIp }: { check: IPCheck | null; ip: string; port: string; ownIp: boolean }) {
   if (!ip.trim() || !check) return null;
   if (!check.valid) return <Note tone="down" icon={<AlertTriangle size={13} />}>Not a valid IP address.</Note>;
-  const others = (check.owners ?? []).filter((o) => o.kind !== "device");
+  // A router DHCP reservation just pins the address to a machine's MAC; it
+  // isn't something else "using" the IP, so it's shown as info, not a warning.
+  const router = (check.owners ?? []).filter((o) => o.kind === "router");
+  const others = (check.owners ?? []).filter((o) => o.kind !== "device" && o.kind !== "router");
   return (
     <div className="mt-3 grid gap-1.5">
       {check.subnet ? <Note tone="muted" icon={<Info size={13} />}>In {check.subnet}</Note> : <Note tone="warn" icon={<Info size={13} />}>Not inside any subnet you've added.</Note>}
       {check.reserved && <Note tone="down" icon={<AlertTriangle size={13} />}>That's the network, broadcast or gateway address.</Note>}
       {check.inDhcp && <Note tone="warn" icon={<AlertTriangle size={13} />}>Inside the DHCP range: the router could hand it to another device.</Note>}
       {others.length > 0 &&
-        (sharedIp ? (
-          <Note tone="muted" icon={<Info size={13} />}>Shared with {others.map((o) => o.label).join(", ")} (fine for Docker).</Note>
+        (ownIp ? (
+          <Note tone="warn" icon={<AlertTriangle size={13} />}>
+            Already used by {others.map((o) => `${o.label} (${o.kind})`).join(", ")}. A VM or LXC normally needs its own IP.
+          </Note>
         ) : (
-          <Note tone="warn" icon={<AlertTriangle size={13} />}>Already used by {others.map((o) => `${o.label} (${o.kind})`).join(", ")}.</Note>
+          // Several services on one machine share its IP; only the port has to be free.
+          <Note tone="muted" icon={<Info size={13} />}>Same IP as {others.map((o) => `${o.label} (${o.kind})`).join(", ")}: fine as long as the port is free.</Note>
         ))}
-      {check.seenOnNetwork && others.length === 0 && <Note tone="warn" icon={<AlertTriangle size={13} />}>A device was recently seen at this IP by a scan.</Note>}
+      {router.map((o) => (
+        <Note key={o.mac || o.label} tone="muted" icon={<Info size={13} />}>
+          Reserved on the router for {o.label && o.label !== o.mac ? `${o.label} (${o.mac})` : o.mac}.
+        </Note>
+      ))}
+      {check.seenOnNetwork && others.length === 0 && router.length === 0 && <Note tone="warn" icon={<AlertTriangle size={13} />}>A device was recently seen at this IP by a scan.</Note>}
       {port && check.portOwner && <Note tone="down" icon={<AlertTriangle size={13} />}>Port {port} is already used by {check.portOwner}.</Note>}
       {port && !check.portOwner && <Note tone="up" icon={<Check size={13} />}>Port {port} is free on this IP.</Note>}
     </div>
