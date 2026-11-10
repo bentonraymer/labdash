@@ -252,7 +252,12 @@ export interface IPCheck {
   subnet?: string;
   inDhcp?: boolean;
   reserved?: boolean;
+  /** Another service already uses the port (a real conflict). */
   portOwner?: string;
+  /** Your own port note for this IP:port, not tied to a service yet. */
+  portClaim?: string;
+  /** A scan found the port open: likely what you're adding. */
+  portSeen?: { banner: string; title: string; lastSeen: string };
 }
 
 // ── Scanning ──────────────────────────────────────────────────────────────

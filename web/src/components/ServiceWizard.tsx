@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { AlertTriangle, Check, CheckCircle2, ChevronLeft, ChevronRight, ImagePlus, Info, Plus, Sparkles, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, ChevronLeft, ChevronRight, ImagePlus, Info, Plus, Radar, Sparkles, X } from "lucide-react";
 import { Modal } from "./Modal";
 import { ServiceIcon } from "./ServiceIcon";
 import { IconPicker } from "./IconPicker";
@@ -552,9 +552,19 @@ function IPFeedback({ check, ip, port, ownIp }: { check: IPCheck | null; ip: str
           Reserved on the router for {o.label && o.label !== o.mac ? `${o.label} (${o.mac})` : o.mac}.
         </Note>
       ))}
-      {check.seenOnNetwork && others.length === 0 && router.length === 0 && <Note tone="warn" icon={<AlertTriangle size={13} />}>A device was recently seen at this IP by a scan.</Note>}
-      {port && check.portOwner && <Note tone="down" icon={<AlertTriangle size={13} />}>Port {port} is already used by {check.portOwner}.</Note>}
-      {port && !check.portOwner && <Note tone="up" icon={<Check size={13} />}>Port {port} is free on this IP.</Note>}
+      {check.seenOnNetwork && others.length === 0 && router.length === 0 && <Note tone="muted" icon={<Radar size={13} />}>A scan recently saw a device at this IP.</Note>}
+      {port && check.portOwner && <Note tone="down" icon={<AlertTriangle size={13} />}>Port {port} is already used by the service {check.portOwner}.</Note>}
+      {port && !check.portOwner && check.portClaim !== undefined && (
+        <Note tone="up" icon={<Check size={13} />}>
+          You noted port {port}{check.portClaim ? ` as "${check.portClaim}"` : ""}; it will be linked to this service.
+        </Note>
+      )}
+      {port && !check.portOwner && check.portClaim === undefined && check.portSeen && (
+        <Note tone="up" icon={<Radar size={13} />}>
+          A scan found {[check.portSeen.title, check.portSeen.banner].filter(Boolean).join(" · ") || "something"} on port {port}. Adding it as a service is fine.
+        </Note>
+      )}
+      {port && !check.portOwner && check.portClaim === undefined && !check.portSeen && <Note tone="up" icon={<Check size={13} />}>Port {port} is free on this IP.</Note>}
     </div>
   );
 }
