@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { api } from "./api";
-import type { Bucket, RouterSettings, RouterSnapshot, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User, VulnFinding, VulnScanState, VulnStatus, VulnStatusKind, UpdatesResponse, UpdateSource } from "./types";
+import type { Bucket, RouterSettings, RouterSnapshot, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User, VulnFinding, VulnScanState, VulnStatus, VulnStatusKind, VulnHistoryPoint, UpdatesResponse, UpdateSource } from "./types";
 
 export const keys = {
   me: ["me"] as const,
@@ -394,6 +394,8 @@ export const useVulns = (status: VulnStatusKind | "all" = "open") =>
   useQuery({ queryKey: [...keys.vulns, status], queryFn: () => api.get<VulnFinding[]>(`/api/vulns?status=${status}`) });
 export const useIPVulns = (ip: string) =>
   useQuery({ queryKey: [...keys.vulns, "ip", ip], queryFn: () => api.get<VulnFinding[]>(`/api/vulns?status=all&ip=${encodeURIComponent(ip)}`), enabled: !!ip });
+export const useVulnHistory = (days: number) =>
+  useQuery({ queryKey: [...keys.vulns, "history", days], queryFn: () => api.get<VulnHistoryPoint[]>(`/api/vulns/history?days=${days}`) });
 export const useVulnStatus = (poll = false) =>
   useQuery({
     queryKey: keys.vulnStatus,
