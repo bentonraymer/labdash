@@ -526,6 +526,17 @@ export interface VulnScanState {
   phase: string;
   started: string;
   queued: number[];
+  /** Current step (1 config & TLS, 2 CVE matching, 3 web checks) of `steps`. */
+  step?: number;
+  steps?: number;
+  /** Percent within the current step; -1 when unknown. */
+  percent?: number;
+  stepStarted?: string;
+  detail?: string;
+  devices?: number;
+  urls?: number;
+  /** Findings so far in this scan. */
+  found?: number;
 }
 
 export interface VulnScanRun {

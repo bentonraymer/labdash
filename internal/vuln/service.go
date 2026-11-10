@@ -30,7 +30,21 @@ type ScanStatus struct {
 	Phase    string  `json:"phase"`
 	Started  string  `json:"started"`
 	Queued   []int64 `json:"queued"`
+	// Progress: Step of Steps (1 config & TLS, 2 CVEs, 3 web checks),
+	// Percent within the step (-1 unknown), when the step started, a
+	// detail line, devices / web URLs in scope and findings so far.
+	Step        int     `json:"step"`
+	Steps       int     `json:"steps"`
+	Percent     float64 `json:"percent"`
+	StepStarted string  `json:"stepStarted"`
+	Detail      string  `json:"detail"`
+	Devices     int     `json:"devices"`
+	URLs        int     `json:"urls"`
+	Found       int     `json:"found"`
 }
+
+// Steps of a vulnerability scan, in order.
+var ScanSteps = []string{"Config & TLS checks", "CVE matching", "Web checks"}
 
 // Service schedules vulnerability scans (one at a time) and keeps the CVE
 // database and Nuclei templates fresh.
@@ -46,7 +60,7 @@ type Service struct {
 	Alert func(ctx context.Context, title, body string)
 
 	// Swappable for tests.
-	RunConfig func(ctx context.Context, targets map[string][]int, now time.Time) ([]Finding, []ServiceInfo, error)
+	RunConfig func(ctx context.Context, targets map[string][]int, now time.Time, onProgress func(Progress)) ([]Finding, []ServiceInfo, error)
 
 	started time.Time
 	mu      sync.Mutex
@@ -55,6 +69,7 @@ type Service struct {
 	wake    chan struct{}
 	tmplMu  sync.Mutex
 	tmplErr string
+	lastPub time.Time
 }
 
 func NewService(db *sql.DB, cve *DB, nuclei Nuclei, hub *events.Hub) *Service {
@@ -81,6 +96,46 @@ func (s *Service) setPhase(p string) {
 	s.status.Phase = p
 	s.mu.Unlock()
 	s.publish()
+}
+
+// startStep moves to step n (1-based) and publishes right away.
+func (s *Service) startStep(n int, detail string) {
+	s.mu.Lock()
+	s.status.Step, s.status.Steps = n, len(ScanSteps)
+	s.status.Phase = ScanSteps[n-1]
+	s.status.Percent, s.status.Detail = 0, detail
+	s.status.StepStarted = time.Now().UTC().Format(tsFormat)
+	s.lastPub = time.Now()
+	s.mu.Unlock()
+	s.publish()
+}
+
+// progress updates the current step (published at most every 2s).
+func (s *Service) progress(p Progress, foundBase int) {
+	s.mu.Lock()
+	if p.Percent >= 0 && p.Percent >= s.status.Percent {
+		s.status.Percent = p.Percent
+	}
+	if p.Detail != "" {
+		s.status.Detail = p.Detail
+	}
+	if p.Matched > 0 {
+		s.status.Found = foundBase + p.Matched
+	}
+	pub := time.Since(s.lastPub) > 2*time.Second
+	if pub {
+		s.lastPub = time.Now()
+	}
+	s.mu.Unlock()
+	if pub {
+		s.publish()
+	}
+}
+
+func (s *Service) setFound(n int) {
+	s.mu.Lock()
+	s.status.Found = n
+	s.mu.Unlock()
 }
 
 // Enqueue requests a vulnerability scan of a target.
@@ -343,16 +398,19 @@ func (s *Service) ScanTarget(ctx context.Context, targetID int64) error {
 
 	var findings []Finding
 	var ran, notes []string
+	s.mu.Lock()
+	s.status.Devices = len(deviceByIP)
+	s.mu.Unlock()
 
 	// 1. Config / TLS checks (+ fresh -sV versions for CVE matching).
-	s.setPhase(fmt.Sprintf("Checking configuration & TLS on %d devices", len(deviceByIP)))
+	s.startStep(1, fmt.Sprintf("Starting nmap on %d device%s", len(deviceByIP), map[bool]string{true: "", false: "s"}[len(deviceByIP) == 1]))
 	targets := map[string][]int{}
 	for ip, ps := range ports {
 		for p := range ps {
 			targets[ip] = append(targets[ip], p)
 		}
 	}
-	cfgFindings, svcs, cfgErr := s.RunConfig(ctx, targets, time.Now())
+	cfgFindings, svcs, cfgErr := s.RunConfig(ctx, targets, time.Now(), func(p Progress) { s.progress(p, 0) })
 	if ctx.Err() != nil {
 		return fail(ctx.Err())
 	}
@@ -362,6 +420,7 @@ func (s *Service) ScanTarget(ctx context.Context, targetID int64) error {
 		ran = append(ran, "config")
 		findings = append(findings, cfgFindings...)
 	}
+	s.setFound(len(findings))
 	// Merge freshly detected versions over what discovery stored.
 	for _, sv := range svcs {
 		if ports[sv.IP] == nil {
@@ -383,7 +442,7 @@ func (s *Service) ScanTarget(ctx context.Context, targetID int64) error {
 
 	// 2. CVEs by detected version.
 	if s.CVE != nil && s.CVE.Status().CVEs > 0 {
-		s.setPhase("Matching service versions against CVEs")
+		s.startStep(2, "Matching detected service versions against the CVE database")
 		cves, err := s.matchCVEs(ctx, ports)
 		if err != nil {
 			notes = append(notes, "CVE matching failed: "+err.Error())
@@ -391,6 +450,7 @@ func (s *Service) ScanTarget(ctx context.Context, targetID int64) error {
 			ran = append(ran, "cve")
 			findings = append(findings, cves...)
 		}
+		s.setFound(len(findings))
 	} else {
 		notes = append(notes, "CVE database isn't downloaded yet, so version-based CVE checks were skipped.")
 	}
@@ -405,6 +465,9 @@ func (s *Service) ScanTarget(ctx context.Context, targetID int64) error {
 		}
 	}
 	sort.Strings(urls)
+	s.mu.Lock()
+	s.status.URLs = len(urls)
+	s.mu.Unlock()
 	switch {
 	case len(urls) == 0:
 		ran = append(ran, "nuclei") // nothing to check means nothing remains open
@@ -413,8 +476,9 @@ func (s *Service) ScanTarget(ctx context.Context, targetID int64) error {
 	case !s.Nuclei.HasTemplates():
 		notes = append(notes, "Nuclei templates haven't been downloaded yet, so web checks were skipped.")
 	default:
-		s.setPhase(fmt.Sprintf("Running web checks on %d URLs", len(urls)))
-		web, err := s.Nuclei.Run(ctx, urls)
+		s.startStep(3, fmt.Sprintf("Starting Nuclei on %d web URL%s", len(urls), map[bool]string{true: "", false: "s"}[len(urls) == 1]))
+		base := len(findings)
+		web, err := s.Nuclei.Run(ctx, urls, func(p Progress) { s.progress(p, base) })
 		if ctx.Err() != nil {
 			return fail(ctx.Err())
 		}
@@ -426,6 +490,10 @@ func (s *Service) ScanTarget(ctx context.Context, targetID int64) error {
 		}
 	}
 
+	s.mu.Lock()
+	s.status.Step, s.status.Steps, s.status.Percent = len(ScanSteps), len(ScanSteps), 100
+	s.status.Found = len(findings)
+	s.mu.Unlock()
 	s.setPhase("Saving findings")
 	scanned := make([]int64, 0, len(deviceByIP))
 	for _, id := range deviceByIP {
