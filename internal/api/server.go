@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -30,6 +31,7 @@ import (
 	"github.com/bentonraymer/labdash/internal/pushover"
 	"github.com/bentonraymer/labdash/internal/scanner"
 	"github.com/bentonraymer/labdash/internal/secrets"
+	"github.com/bentonraymer/labdash/internal/vuln"
 )
 
 type Server struct {
@@ -46,13 +48,16 @@ type Server struct {
 	NPM          *npm.Client
 	Proxmox      *proxmox.Poller
 	GLiNet       *glinet.Client
+	Vuln         *vuln.Service
 	// Restart exits the process so Docker restarts it (used to apply a restore).
 	Restart func()
 
-	npmCache npmCache
-	router   routerState
-	Web      fs.FS // built frontend (web/dist)
-	Version  string
+	npmCache     npmCache
+	nucleiVer    sync.Once
+	nucleiVerStr string
+	router       routerState
+	Web          fs.FS // built frontend (web/dist)
+	Version      string
 }
 
 func (s *Server) Router() http.Handler {
@@ -171,6 +176,11 @@ func (s *Server) Router() http.Handler {
 			r.Delete("/scan-targets/{id}", s.handleDeleteScanTarget)
 			r.Post("/scan-targets/{id}/run", s.handleRunScanTarget)
 			r.Get("/scans", s.handleScanStatus)
+			r.Post("/scan-targets/{id}/vuln-scan", s.handleRunVulnScan)
+			r.Get("/vulns", s.handleListVulns)
+			r.Get("/vulns/status", s.handleVulnStatus)
+			r.Post("/vulns/sync", s.handleVulnSync)
+			r.Patch("/vulns/{id}", s.handleUpdateVuln)
 			r.Get("/devices", s.handleListDevices)
 			r.Post("/devices/acknowledge-all", s.handleAcknowledgeAll)
 			r.Patch("/devices/{id}", s.handleUpdateDevice)

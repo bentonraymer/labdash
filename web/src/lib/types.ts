@@ -23,6 +23,8 @@ export interface Settings {
   backup_keep: number;
   tile_glow: boolean;
   open_new_tab: boolean;
+  vuln_enabled: boolean;
+  vuln_alert_min: "critical" | "high" | "medium" | "low" | "off";
 }
 
 export interface Section {
@@ -42,6 +44,7 @@ export interface QuickLink {
 export interface Service {
   id: number;
   sectionId: number | null;
+  parentId: number | null;
   name: string;
   icon: string;
   description: string;
@@ -179,6 +182,8 @@ export interface Hosting {
   runtime: Runtime;
   vmid: number | null;
   containerName: string;
+  inherited?: boolean;
+  viaService?: string;
 }
 
 export interface Subnet {
@@ -201,6 +206,9 @@ export interface IPOwner {
   label: string;
   sub: string;
   icon?: string;
+  mac?: string;
+  lastSeen?: string;
+  up?: boolean;
 }
 
 export type CellState = "network" | "broadcast" | "gateway" | "static" | "reserved" | "service" | "lease" | "dhcp" | "discovered" | "free" | "unmanaged";
@@ -259,6 +267,9 @@ export interface ScanTarget {
   customPorts: string;
   enabled: boolean;
   lastRunAt: string | null;
+  vulnEnabled?: boolean;
+  vulnSchedule?: string;
+  vulnLastRun?: string | null;
 }
 
 export interface ScanStatus {
@@ -313,6 +324,8 @@ export interface Device {
   host: { id: number; name: string } | null;
   services: { id: number; name: string; icon?: string }[];
   ports: DevicePort[];
+  /** Open vulnerability findings by severity. */
+  vulns?: Partial<Record<Severity, number>>;
 }
 
 export interface DeviceEvent {
@@ -470,4 +483,66 @@ export interface RouterSnapshot {
   fetchedAt: string;
   reservations: RouterReservation[];
   clients: RouterClient[];
+}
+
+// ── Vulnerabilities ───────────────────────────────────────────────────────
+
+export type Severity = "critical" | "high" | "medium" | "low" | "info";
+export type VulnStatusKind = "open" | "fixed" | "accepted" | "ignored";
+
+export interface VulnFinding {
+  id: number;
+  deviceId: number;
+  deviceName: string;
+  ip: string;
+  port: number;
+  source: "cve" | "nuclei" | "config";
+  key: string;
+  title: string;
+  severity: Severity;
+  cvss: number;
+  kev: boolean;
+  description: string;
+  evidence: string;
+  references: string[];
+  fixedIn: string;
+  confidence: "high" | "low";
+  status: VulnStatusKind;
+  note: string;
+  firstSeen: string;
+  lastSeen: string;
+  resolvedAt: string | null;
+}
+
+export interface VulnScanState {
+  running: boolean;
+  targetId: number;
+  cidr: string;
+  phase: string;
+  started: string;
+  queued: number[];
+}
+
+export interface VulnScanRun {
+  id: number;
+  targetId: number | null;
+  cidr: string;
+  startedAt: string;
+  finishedAt: string | null;
+  status: "running" | "done" | "failed";
+  devices: number;
+  newCount: number;
+  openCount: number;
+  notes: string;
+  error: string;
+}
+
+export interface VulnStatus {
+  available: boolean;
+  scan?: VulnScanState;
+  cveDb?: { cves: number; kev: number; lastSync: string; lastFull: string; syncing: boolean; progress: string; error: string };
+  nuclei?: { installed: boolean; version?: string; templatesUpdated: string; error: string };
+  open?: Partial<Record<Severity, number>>;
+  kev?: number;
+  recent?: VulnScanRun[];
 }

@@ -22,12 +22,24 @@ COPY --from=web /web/dist ./web/dist
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/labdash ./cmd/labdash
 
-# ── 3. Runtime ────────────────────────────────────────────────────────────
+# ── 3. Nuclei (web vulnerability checks), checksum-verified ───────────────
+FROM --platform=$BUILDPLATFORM alpine:3.22 AS nuclei
+ARG TARGETARCH NUCLEI_VERSION=3.11.1
+WORKDIR /dl
+RUN apk add --no-cache curl unzip \
+ && base="https://github.com/projectdiscovery/nuclei/releases/download/v${NUCLEI_VERSION}" \
+ && file="nuclei_${NUCLEI_VERSION}_linux_${TARGETARCH}.zip" \
+ && curl -fsSLO "$base/$file" \
+ && curl -fsSL "$base/nuclei_${NUCLEI_VERSION}_checksums.txt" | grep " ${file}\$" | sha256sum -c - \
+ && unzip -q "$file" nuclei && chmod 0755 nuclei
+
+# ── 4. Runtime ────────────────────────────────────────────────────────────
 FROM alpine:3.22
 # nmap: network scanning · iputils: ICMP ping · tzdata: correct local times
 RUN apk add --no-cache ca-certificates tzdata nmap nmap-scripts iputils \
  && mkdir -p /data
 COPY --from=server /out/labdash /usr/local/bin/labdash
+COPY --from=nuclei /dl/nuclei /usr/local/bin/nuclei
 ENV LABDASH_DATA_DIR=/data PORT=8080
 VOLUME ["/data"]
 EXPOSE 8080

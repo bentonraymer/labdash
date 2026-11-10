@@ -26,7 +26,7 @@ function HostNode({ data }: NodeProps<Node<HostData>>) {
   const top = !h.parentId;
   return (
     <div className={clsx("w-[200px] rounded-lg border px-3 py-2 shadow-lg", top ? "border-accent/50 bg-[#141a2a]" : "border-line-2 bg-panel-2")}>
-      <Handle type="target" position={Position.Top} className="!border-0 !bg-line-2" />
+      <Handle type="target" position={Position.Left} className="!border-0 !bg-line-2" />
       <div className="flex items-center gap-2">
         <Icon size={15} className={top ? "text-accent" : "text-muted"} />
         <span className="truncate text-[13px] font-semibold">{h.name}</span>
@@ -44,7 +44,7 @@ function HostNode({ data }: NodeProps<Node<HostData>>) {
         </div>
       ))}
       {data.usage && <div className="mt-1.5">{data.usage}</div>}
-      <Handle type="source" position={Position.Bottom} className="!border-0 !bg-line-2" />
+      <Handle type="source" position={Position.Right} className="!border-0 !bg-line-2" />
     </div>
   );
 }
@@ -62,7 +62,7 @@ function ServiceNode({ data }: NodeProps<Node<ServiceData>>) {
   const s = data.service;
   return (
     <div className={clsx("glass flex w-[180px] items-center gap-2 rounded-lg border px-2.5 py-2", ring[s.status])}>
-      <Handle type="target" position={Position.Top} className="!border-0 !bg-line-2" />
+      <Handle type="target" position={Position.Left} className="!border-0 !bg-line-2" />
       <ServiceIcon icon={s.icon} name={s.name} className="size-6 shrink-0" />
       <div className="min-w-0 flex-1">
         <div className="truncate text-[12px] font-medium">{s.name}</div>
@@ -72,13 +72,14 @@ function ServiceNode({ data }: NodeProps<Node<ServiceData>>) {
         </div>
       </div>
       <StatusDot status={s.status} />
+      <Handle type="source" position={Position.Right} className="!border-0 !bg-line-2" />
     </div>
   );
 }
 
 const nodeTypes = { host: HostNode, service: ServiceNode };
 
-/** Hosts → guests → services, laid out top-down with ELK. */
+/** Hosts → guests → services, laid out left-to-right with ELK. */
 export function TopologyPage() {
   const { data: hosts = [] } = useHosts();
   const { data: lp } = useLaunchpad();
@@ -91,10 +92,14 @@ export function TopologyPage() {
   const services = useMemo(() => lp?.services ?? [], [lp?.services]);
   const placed = services.filter((s) => s.hosting?.hostId && hosts.some((h) => h.id === s.hosting!.hostId));
   // Bare-metal services are the host itself: drawn inside the host's card.
-  const hosted = placed.filter((s) => s.hosting!.runtime !== "bare_metal");
-  const itselfOf = (hostId: number) => placed.filter((s) => s.hosting!.runtime === "bare_metal" && s.hosting!.hostId === hostId);
+  const ownBare = (s: Service) => s.hosting!.runtime === "bare_metal" && !s.hosting!.inherited;
+  const hosted = placed.filter((s) => !ownBare(s));
+  const itselfOf = (hostId: number) => placed.filter((s) => ownBare(s) && s.hosting!.hostId === hostId);
+  // Draw a service under its parent service when the parent has its own node.
+  const hostedIds = new Set(hosted.map((s) => s.id));
+  const sourceOf = (s: Service) => (s.parentId != null && hostedIds.has(s.parentId) ? `s${s.parentId}` : `h${s.hosting!.hostId}`);
   // Re-layout only when structure changes, not on every status/stat refresh.
-  const shapeKey = JSON.stringify([hosts.map((h) => [h.id, h.parentId, itselfOf(h.id).length]), hosted.map((s) => [s.id, s.hosting?.hostId])]);
+  const shapeKey = JSON.stringify([hosts.map((h) => [h.id, h.parentId, itselfOf(h.id).length]), hosted.map((s) => [s.id, s.hosting?.hostId, s.parentId])]);
 
   useEffect(() => {
     if (!hosts.length) {
@@ -107,11 +112,11 @@ export function TopologyPage() {
       id: "root",
       layoutOptions: {
         "elk.algorithm": "layered",
-        "elk.direction": "DOWN",
-        "elk.layered.spacing.nodeNodeBetweenLayers": "70",
-        "elk.spacing.nodeNode": "28",
+        "elk.direction": "RIGHT",
+        "elk.layered.spacing.nodeNodeBetweenLayers": "90",
+        "elk.spacing.nodeNode": "14",
         "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
-        // All top-level hosts start in the first row.
+        // All top-level hosts start in the first column.
         "elk.layered.layering.strategy": "LONGEST_PATH_SOURCE",
         // Lay out all trees together instead of packing each into rows.
         "elk.separateConnectedComponents": "false",
@@ -122,7 +127,7 @@ export function TopologyPage() {
       ],
       edges: [
         ...hosts.filter((h) => h.parentId && ids.has(h.parentId)).map((h) => ({ id: `e-h${h.id}`, sources: [`h${h.parentId}`], targets: [`h${h.id}`] })),
-        ...hosted.map((s) => ({ id: `e-s${s.id}`, sources: [`h${s.hosting!.hostId}`], targets: [`s${s.id}`] })),
+        ...hosted.map((s) => ({ id: `e-s${s.id}`, sources: [sourceOf(s)], targets: [`s${s.id}`] })),
       ],
     };
     let cancelled = false;

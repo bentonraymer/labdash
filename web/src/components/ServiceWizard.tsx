@@ -9,6 +9,7 @@ import { HostingFields, emptyHosting, hostingToInput, type HostingForm } from ".
 import { api, ApiError } from "@/lib/api";
 import { checkIP, useHosts, useLaunchpad, useNPMStatus, useRouter, useSubnets } from "@/lib/queries";
 import { CertPicker, defaultCert } from "./NPMPanel";
+import { ParentPicker } from "./ParentPicker";
 import { isMac, useMacFor } from "./RouterBits";
 import { slugifyIconName } from "@/lib/icons";
 import { runtimeLabel } from "@/lib/labels";
@@ -52,6 +53,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   const [desc, setDesc] = useState("");
   const [picker, setPicker] = useState(false);
   const [hosting, setHosting] = useState<HostingForm>(emptyHosting);
+  const [parentId, setParentId] = useState("");
   const [scheme, setScheme] = useState<"http" | "https">("http");
   const [ip, setIp] = useState("");
   const [port, setPort] = useState("");
@@ -59,6 +61,9 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
   const [sub, setSub] = useState("");
   const [subTouched, setSubTouched] = useState(false);
   const [useDns, setUseDns] = useState(true);
+  // "wild" = subdomain of the wildcard domain; "custom" = any hostname you type.
+  const [dnsMode, setDnsMode] = useState<"wild" | "custom" | "none">("wild");
+  const [customHost, setCustomHost] = useState("");
   const [extra, setExtra] = useState<ExtraPort[]>([]);
   const [reserveIp, setReserveIp] = useState(true);
   const [monitor, setMonitor] = useState<"" | "http" | "tcp" | "ping">("http");
@@ -78,6 +83,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
     setDesc("");
     setPicker(false);
     setHosting(emptyHosting);
+    setParentId("");
     setScheme("http");
     setIp("");
     setPort("");
@@ -85,6 +91,8 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
     setSub("");
     setSubTouched(false);
     setUseDns(!!domain);
+    setDnsMode(domain ? "wild" : "custom");
+    setCustomHost("");
     setExtra([]);
     setReserveIp(true);
     setMonitor("http");
@@ -125,7 +133,8 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
     return () => clearTimeout(t);
   }, [ip, port]);
 
-  const dnsUrl = useDns && sub && domain ? `https://${sub}.${domain}` : "";
+  const customUrl = customHost.trim() ? (/^https?:\/\//i.test(customHost.trim()) ? customHost.trim() : `https://${customHost.trim()}`) : "";
+  const dnsUrl = dnsMode === "custom" ? customUrl : dnsMode === "wild" && useDns && sub && domain ? `https://${sub}.${domain}` : "";
   useEffect(() => setCert(defaultCert(certs, dnsUrl ? new URL(dnsUrl).hostname : "")), [certs, dnsUrl]);
   const canNPM = npmReady && !!dnsUrl && !!ip.trim() && !!port;
   // Router reservation: prefill the MAC from the host, a scan or the router.
@@ -159,6 +168,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
           directPort: port ? Number(port) : null,
           directPath: path.trim(),
           newTab: true,
+          parentId: parentId ? Number(parentId) : null,
         },
         hosting: hostingToInput(hosting),
         reserveIp: reserveIp && !!ip.trim(),
@@ -282,6 +292,7 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
       {step === 1 && (
         <div className="grid gap-3">
           <p className="text-sm text-muted">Where does it run? This feeds the services table, the Hosts tree and topology. You can skip it.</p>
+          <ParentPicker value={parentId} onChange={setParentId} />
           <HostingFields value={hosting} onChange={setHosting} />
         </div>
       )}
@@ -326,29 +337,50 @@ export function ServiceWizard({ open, onClose, sectionId }: { open: boolean; onC
 
           <fieldset className="rounded-lg border border-line p-4">
             <legend className="px-1 text-xs font-semibold text-accent">DNS name</legend>
-            {domain ? (
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {(
+                [
+                  ["wild", domain ? `*.${domain}` : "Wildcard domain"],
+                  ["custom", "Custom hostname"],
+                  ["none", "No DNS name"],
+                ] as const
+              ).map(([m, label]) => (
+                <button
+                  type="button"
+                  key={m}
+                  disabled={m === "wild" && !domain}
+                  onClick={() => {
+                    setDnsMode(m);
+                    setUseDns(m === "wild");
+                  }}
+                  className={clsx("rounded-md border px-2.5 py-1 text-xs transition disabled:opacity-40", dnsMode === m ? "border-accent bg-accent/15 text-fg" : "border-line-2 text-muted hover:text-fg")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {dnsMode === "wild" &&
+              (domain ? (
+                <div className="flex items-center gap-1 font-mono text-sm">
+                  <span className="text-muted">https://</span>
+                  <input
+                    className="input w-48 py-1.5"
+                    value={sub}
+                    onChange={(e) => {
+                      setSubTouched(true);
+                      setSub(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""));
+                    }}
+                  />
+                  <span className="text-muted">.{domain}</span>
+                </div>
+              ) : (
+                <p className="text-xs text-muted">Set your internal DNS domain in Settings to get DNS URLs suggested here.</p>
+              ))}
+            {dnsMode === "custom" && (
               <>
-                <label className="flex items-center gap-2 text-sm text-muted">
-                  <input type="checkbox" className="accent-accent" checked={useDns} onChange={(e) => setUseDns(e.target.checked)} />
-                  Reachable through the wildcard *.{domain}
-                </label>
-                {useDns && (
-                  <div className="mt-2 flex items-center gap-1 font-mono text-sm">
-                    <span className="text-muted">https://</span>
-                    <input
-                      className="input w-48 py-1.5"
-                      value={sub}
-                      onChange={(e) => {
-                        setSubTouched(true);
-                        setSub(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""));
-                      }}
-                    />
-                    <span className="text-muted">.{domain}</span>
-                  </div>
-                )}
+                <input className="input font-mono" value={customHost} onChange={(e) => setCustomHost(e.target.value)} placeholder="links.example.org  or  https://status.example.com/app" />
+                <p className="mt-1 text-[11px] text-faint">Any hostname or full URL. LabDash won't touch DNS for it; NPM checks still work if NPM serves that name.</p>
               </>
-            ) : (
-              <p className="text-xs text-muted">Set your internal DNS domain in Settings to get DNS URLs suggested here.</p>
             )}
           </fieldset>
 

@@ -42,12 +42,13 @@ type nmapHost struct {
 			State string `xml:"state,attr"`
 		} `xml:"state"`
 		Service struct {
-			Name      string `xml:"name,attr"`
-			Product   string `xml:"product,attr"`
-			Version   string `xml:"version,attr"`
-			ExtraInfo string `xml:"extrainfo,attr"`
-			OSType    string `xml:"ostype,attr"`
-			Tunnel    string `xml:"tunnel,attr"`
+			Name      string   `xml:"name,attr"`
+			Product   string   `xml:"product,attr"`
+			Version   string   `xml:"version,attr"`
+			ExtraInfo string   `xml:"extrainfo,attr"`
+			OSType    string   `xml:"ostype,attr"`
+			Tunnel    string   `xml:"tunnel,attr"`
+			CPEs      []string `xml:"cpe"`
 		} `xml:"service"`
 	} `xml:"ports>port"`
 	OSMatches []struct {
@@ -81,6 +82,7 @@ type Port struct {
 	Product string
 	Version string
 	TLS     bool
+	CPE     string // space-separated CPEs from -sV
 	// Filled by HTTP enrichment
 	Title   string
 	Favicon string
@@ -138,6 +140,7 @@ func ParseXML(r io.Reader) ([]Host, error) {
 				Port: p.PortID, Proto: p.Protocol, State: "open",
 				Service: sv.Name, Product: sv.Product, Version: strings.TrimSpace(sv.Version + " " + sv.ExtraInfo),
 				TLS: sv.Tunnel == "ssl" || strings.Contains(sv.Name, "https"),
+				CPE: strings.Join(sv.CPEs, " "),
 			})
 			// Fall back to the OS a service banner reports ("Linux", "Windows").
 			if host.OSFamily == "" && sv.OSType != "" {

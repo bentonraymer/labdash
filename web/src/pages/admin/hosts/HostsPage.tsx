@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import clsx from "clsx";
 import { Plus } from "lucide-react";
@@ -47,8 +47,19 @@ export function HostsPage() {
     const Icon = hostKindIcon[h.kind];
     const kids = children.get(h.id) ?? [];
     const all = servicesOn.get(h.id) ?? [];
-    const svcs = all.filter((s) => s.hosting?.runtime !== "bare_metal");
-    const itself = all.filter((s) => s.hosting?.runtime === "bare_metal");
+    const isItself = (s: Service) => s.hosting?.runtime === "bare_metal" && !s.hosting.inherited;
+    const svcs = all.filter((s) => !isItself(s));
+    const itself = all.filter(isItself);
+    // Nest services under their parent service when both live here.
+    const here = new Set(svcs.map((s) => s.id));
+    const svcKids = (pid: number | null) => svcs.filter((s) => (pid == null ? s.parentId == null || !here.has(s.parentId) : s.parentId === pid));
+    const renderSvc = (s: Service, d: number, seen: Set<number>): ReactNode =>
+      seen.has(s.id) ? null : (
+        <div key={s.id}>
+          <ServiceLine service={s} depth={d} onClick={() => ui.editService(s)} />
+          {svcKids(s.id).map((c) => renderSvc(c, d + 1, new Set([...seen, s.id])))}
+        </div>
+      );
     return (
       <div key={h.id}>
         <div
@@ -103,9 +114,7 @@ export function HostsPage() {
             <Plus size={13} /> Add guest
           </button>
         </div>
-        {svcs.map((s) => (
-          <ServiceLine key={s.id} service={s} depth={depth + 1} onClick={() => ui.editService(s)} />
-        ))}
+        {svcKids(null).map((s) => renderSvc(s, depth + 1, new Set()))}
         {kids.map((k) => renderHost(k, depth + 1))}
       </div>
     );
@@ -156,9 +165,13 @@ function ServiceLine({ service: s, depth, onClick }: { service: Service; depth: 
       <StatusDot status={s.status} className="size-2" />
       <ServiceIcon icon={s.icon} name={s.name} className="size-4" />
       <span>{s.name}</span>
-      <span className={clsx("rounded px-1.5 py-px text-[10px] font-medium", runtimeTone[h.runtime])}>{runtimeLabel[h.runtime]}</span>
-      {h.vmid != null && <span className="font-mono text-faint">#{h.vmid}</span>}
-      {h.containerName && <span className="font-mono text-faint">{h.containerName}</span>}
+      {h.inherited ? (
+        <span className="text-[10px] text-faint">under {h.viaService}</span>
+      ) : (
+        <span className={clsx("rounded px-1.5 py-px text-[10px] font-medium", runtimeTone[h.runtime])}>{runtimeLabel[h.runtime]}</span>
+      )}
+      {!h.inherited && h.vmid != null && <span className="font-mono text-faint">#{h.vmid}</span>}
+      {!h.inherited && h.containerName && <span className="font-mono text-faint">{h.containerName}</span>}
       {s.directIp && (
         <span className="ml-auto font-mono text-muted">
           {s.directIp}

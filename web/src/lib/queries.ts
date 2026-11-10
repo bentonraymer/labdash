@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { api } from "./api";
-import type { Bucket, RouterSettings, RouterSnapshot, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User } from "./types";
+import type { Bucket, RouterSettings, RouterSnapshot, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User, VulnFinding, VulnScanState, VulnStatus, VulnStatusKind } from "./types";
 
 export const keys = {
   me: ["me"] as const,
@@ -16,6 +16,8 @@ export const keys = {
   hosts: ["hosts"] as const,
   subnets: ["subnets"] as const,
   devices: ["devices"] as const,
+  vulns: ["vulns"] as const,
+  vulnStatus: ["vuln-status"] as const,
   scans: ["scans"] as const,
   scanTargets: ["scan-targets"] as const,
   notes: ["notes"] as const,
@@ -70,6 +72,7 @@ export function usePatchSettings() {
 export type ServiceInput = Partial<Omit<Service, "id" | "url" | "directUrl" | "status" | "position" | "archivedAt" | "hosting" | "latencyMs">> & {
   clearPort?: boolean;
   clearSection?: boolean;
+  clearParent?: boolean;
   archived?: boolean;
 };
 
@@ -138,6 +141,16 @@ export function useLiveEvents(enabled: boolean) {
             qc.invalidateQueries({ queryKey: keys.notes });
             qc.invalidateQueries({ queryKey: keys.tags });
             qc.invalidateQueries({ queryKey: keys.folders });
+          }
+          if (msg.type === "vuln") {
+            qc.setQueryData<VulnStatus>(keys.vulnStatus, (prev) => (prev ? { ...prev, scan: msg.data as VulnScanState } : prev));
+            if (!(msg.data as VulnScanState).running) qc.invalidateQueries({ queryKey: keys.vulnStatus });
+          }
+          if (msg.type === "vulns") {
+            qc.invalidateQueries({ queryKey: keys.vulns });
+            qc.invalidateQueries({ queryKey: keys.vulnStatus });
+            qc.invalidateQueries({ queryKey: keys.devices });
+            qc.invalidateQueries({ queryKey: keys.scanTargets });
           }
           if (msg.type === "devices") {
             qc.invalidateQueries({ queryKey: keys.devices });
@@ -370,6 +383,48 @@ export function useRunScan() {
   return useMutation({
     mutationFn: (id: number) => api.post<ScanStatus>(`/api/scan-targets/${id}/run`),
     onSuccess: () => qc.invalidateQueries({ queryKey: keys.scans }),
+  });
+}
+
+// ── Vulnerabilities ───────────────────────────────────────────────────────
+
+export const useVulns = (status: VulnStatusKind | "all" = "open") =>
+  useQuery({ queryKey: [...keys.vulns, status], queryFn: () => api.get<VulnFinding[]>(`/api/vulns?status=${status}`) });
+export const useIPVulns = (ip: string) =>
+  useQuery({ queryKey: [...keys.vulns, "ip", ip], queryFn: () => api.get<VulnFinding[]>(`/api/vulns?status=all&ip=${encodeURIComponent(ip)}`), enabled: !!ip });
+export const useVulnStatus = (poll = false) =>
+  useQuery({
+    queryKey: keys.vulnStatus,
+    queryFn: () => api.get<VulnStatus>("/api/vulns/status"),
+    // Poll while the CVE database is syncing (that progress isn't pushed live).
+    refetchInterval: (q) => (poll || q.state.data?.cveDb?.syncing ? 3000 : 60_000),
+  });
+
+export function useUpdateVuln() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: number; status?: "open" | "accepted" | "ignored"; note?: string }) => api.patch(`/api/vulns/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.vulns });
+      qc.invalidateQueries({ queryKey: keys.vulnStatus });
+      qc.invalidateQueries({ queryKey: keys.devices });
+    },
+  });
+}
+
+export function useRunVulnScan() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (targetId: number) => api.post<VulnScanState>(`/api/scan-targets/${targetId}/vuln-scan`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: keys.vulnStatus }),
+  });
+}
+
+export function useVulnSync() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { full?: boolean; what?: "cve" | "templates" }) => api.post("/api/vulns/sync", body),
+    onSuccess: () => setTimeout(() => qc.invalidateQueries({ queryKey: keys.vulnStatus }), 500),
   });
 }
 

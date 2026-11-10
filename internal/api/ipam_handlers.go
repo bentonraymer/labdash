@@ -25,6 +25,10 @@ type IPOwner struct {
 	Label string `json:"label"`
 	Sub   string `json:"sub"` // assignment kind / host kind / port / vendor
 	Icon  string `json:"icon,omitempty"`
+	// Extra facts so the UI can say where each claim comes from.
+	MAC      string `json:"mac,omitempty"`
+	LastSeen string `json:"lastSeen,omitempty"` // devices: last time a scan or the router saw it
+	Up       bool   `json:"up,omitempty"`       // devices: online in the latest scan/router poll
 }
 
 // ipUsage collects manual reservations, host IPs, service direct IPs and
@@ -41,10 +45,10 @@ func (s *Server) ipUsage(ctx context.Context) (map[string][]IPOwner, error) {
 		kind string
 	}
 	queries := []q{
-		{`SELECT id, ip, COALESCE(NULLIF(label, ''), (SELECT name FROM services WHERE id = service_id), (SELECT name FROM hosts WHERE id = host_id), ''), kind, '' FROM ip_assignments`, "assignment"},
-		{`SELECT id, ip, name, kind, '' FROM hosts WHERE ip != ''`, "host"},
-		{`SELECT id, direct_ip, name, COALESCE(CAST(direct_port AS TEXT), ''), icon FROM services WHERE direct_ip != '' AND archived_at IS NULL`, "service"},
-		{`SELECT id, ip, COALESCE(NULLIF(custom_name, ''), NULLIF(router_name, ''), NULLIF(hostname, ''), NULLIF(vendor, ''), mac), vendor, '' FROM devices
+		{`SELECT id, ip, COALESCE(NULLIF(label, ''), (SELECT name FROM services WHERE id = service_id), (SELECT name FROM hosts WHERE id = host_id), ''), kind, '', '', '', 0 FROM ip_assignments`, "assignment"},
+		{`SELECT id, ip, name, kind, '', mac, '', 0 FROM hosts WHERE ip != ''`, "host"},
+		{`SELECT id, direct_ip, name, COALESCE(CAST(direct_port AS TEXT), ''), icon, '', '', 0 FROM services WHERE direct_ip != '' AND archived_at IS NULL`, "service"},
+		{`SELECT id, ip, COALESCE(NULLIF(custom_name, ''), NULLIF(router_name, ''), NULLIF(hostname, ''), NULLIF(vendor, ''), mac), vendor, '', mac, last_seen, is_up FROM devices
 		  WHERE ip != '' AND ignored = 0 AND last_seen >= ?`, "device"},
 	}
 	for _, b := range s.routerSnapshot().Reservations {
@@ -52,7 +56,7 @@ func (s *Server) ipUsage(ctx context.Context) (map[string][]IPOwner, error) {
 		if label == "" {
 			label = b.MAC
 		}
-		add(b.IP, IPOwner{Kind: "router", Label: label, Sub: b.MAC})
+		add(b.IP, IPOwner{Kind: "router", Label: label, Sub: b.MAC, MAC: b.MAC})
 	}
 	since := time.Now().UTC().Add(-7 * 24 * time.Hour).Format("2006-01-02T15:04:05.000Z")
 	for _, qq := range queries {
@@ -69,7 +73,7 @@ func (s *Server) ipUsage(ctx context.Context) (map[string][]IPOwner, error) {
 		for rows.Next() {
 			var o IPOwner
 			var ip string
-			if err := rows.Scan(&o.ID, &ip, &o.Label, &o.Sub, &o.Icon); err != nil {
+			if err := rows.Scan(&o.ID, &ip, &o.Label, &o.Sub, &o.Icon, &o.MAC, &o.LastSeen, &o.Up); err != nil {
 				rows.Close()
 				return nil, err
 			}

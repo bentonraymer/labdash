@@ -13,6 +13,7 @@ import { HostsPage } from "@/pages/admin/hosts/HostsPage";
 import { IPAddressesPage } from "@/pages/admin/network/IPAddressesPage";
 import { IPDetailPage } from "@/pages/admin/network/IPDetailPage";
 import { DevicesPage } from "@/pages/admin/network/DevicesPage";
+import { VulnerabilitiesPage } from "@/pages/admin/network/VulnerabilitiesPage";
 
 // The docs editor (CodeMirror + markdown) is loaded on demand.
 const DocsPage = lazy(() => import("@/pages/admin/docs/DocsPage").then((m) => ({ default: m.DocsPage })));
@@ -49,6 +50,7 @@ const router = createBrowserRouter([
           { path: "/network/ips", element: <IPAddressesPage /> },
           { path: "/network/ips/:ip", element: <IPDetailPage /> },
           { path: "/network/devices", element: <DevicesPage /> },
+          { path: "/network/vulns", element: <VulnerabilitiesPage /> },
           { path: "/docs", element: <Lazy><DocsPage /></Lazy> },
           { path: "/docs/:id", element: <Lazy><DocsPage /></Lazy> },
           { path: "/topology", element: <Lazy><TopologyPage /></Lazy> },

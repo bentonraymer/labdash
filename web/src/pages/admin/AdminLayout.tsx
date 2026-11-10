@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Activity, Cpu, FileText, LayoutGrid, LogOut, Network, Search, Server, Settings, Share2, Table, type LucideIcon } from "lucide-react";
+import { Activity, Cpu, FileText, LayoutGrid, LogOut, Network, Search, Server, Settings, Share2, ShieldAlert, Table, type LucideIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import { useLaunchpad, useMe } from "@/lib/queries";
 import { ModeToggle } from "@/components/ModeToggle";
@@ -16,6 +16,7 @@ const nav: { to: string; label: string; icon: LucideIcon; group?: string }[] = [
   { to: "/topology", label: "Topology", icon: Share2, group: "Inventory" },
   { to: "/network/devices", label: "Devices", icon: Network, group: "Network" },
   { to: "/network/ips", label: "IP Addresses", icon: Server, group: "Network" },
+  { to: "/network/vulns", label: "Vulnerabilities", icon: ShieldAlert, group: "Network" },
   { to: "/docs", label: "Docs", icon: FileText, group: "Knowledge" },
   { to: "/settings", label: "Settings", icon: Settings, group: "System" },
 ];
