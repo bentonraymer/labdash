@@ -4,6 +4,10 @@ import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import {
+  AlarmClock,
+  ArrowUpCircle,
+  ListTodo,
+  ShieldAlert,
   Activity,
   BellOff,
   Bell,
@@ -108,6 +112,11 @@ export function Spotlight({ open, onClose }: { open: boolean; onClose: () => voi
       { id: "go-docs", title: "Docs", subtitle: "Go to", icon: FileText, run: go("/docs"), keywords: "notes markdown" },
       { id: "go-topology", title: "Topology", subtitle: "Go to", icon: Share2, run: go("/topology"), keywords: "map graph" },
       { id: "go-settings", title: "Settings", subtitle: "Go to", icon: SettingsIcon, run: go("/settings"), keywords: "config preferences" },
+      { id: "go-todos", title: "Todos", subtitle: "Go to", icon: ListTodo, run: go("/todos"), keywords: "tasks goals planning" },
+      { id: "go-todos-today", title: "Todos due today", subtitle: "Today & overdue", icon: ListTodo, run: go("/todos?view=today"), keywords: "tasks overdue due" },
+      { id: "go-reminders", title: "Reminders", subtitle: "Go to", icon: AlarmClock, run: go("/reminders"), keywords: "recurring schedule backups pushover" },
+      { id: "go-updates", title: "Updates", subtitle: "Go to", icon: ArrowUpCircle, run: go("/updates"), keywords: "versions outdated docker" },
+      { id: "go-vulns", title: "Vulnerabilities", subtitle: "Go to", icon: ShieldAlert, run: go("/network/vulns"), keywords: "cve security nuclei" },
     ];
     return list;
   }, [settings?.access_mode, settings?.alerts_paused, navigate, ui, patch]);

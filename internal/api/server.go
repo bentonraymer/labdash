@@ -27,6 +27,7 @@ import (
 	"github.com/bentonraymer/labdash/internal/integrations"
 	"github.com/bentonraymer/labdash/internal/monitor"
 	"github.com/bentonraymer/labdash/internal/npm"
+	"github.com/bentonraymer/labdash/internal/planning"
 	"github.com/bentonraymer/labdash/internal/proxmox"
 	"github.com/bentonraymer/labdash/internal/pushover"
 	"github.com/bentonraymer/labdash/internal/scanner"
@@ -51,6 +52,7 @@ type Server struct {
 	GLiNet       *glinet.Client
 	Vuln         *vuln.Service
 	Updates      *updates.Checker
+	Planning     *planning.Service
 	// Restart exits the process so Docker restarts it (used to apply a restore).
 	Restart func()
 
@@ -184,6 +186,23 @@ func (s *Server) Router() http.Handler {
 			r.Get("/vulns/history", s.handleVulnHistory)
 			r.Post("/vulns/sync", s.handleVulnSync)
 			r.Patch("/vulns/{id}", s.handleUpdateVuln)
+			r.Get("/reminders", s.handleListReminders)
+			r.Post("/reminders", s.handleCreateReminder)
+			r.Put("/reminders/{id}", s.handleUpdateReminder)
+			r.Delete("/reminders/{id}", s.handleDeleteReminder)
+			r.Post("/reminders/{id}/{action}", s.handleReminderAction)
+			r.Get("/todos", s.handleListTodos)
+			r.Post("/todos", s.handleCreateTodo)
+			r.Post("/todos/reorder", s.handleReorderTodos)
+			r.Patch("/todos/{id}", s.handleUpdateTodo)
+			r.Delete("/todos/{id}", s.handleDeleteTodo)
+			r.Post("/todos/{id}/checklist", s.handleAddChecklist)
+			r.Patch("/checklist/{id}", s.handleUpdateChecklist)
+			r.Delete("/checklist/{id}", s.handleDeleteChecklist)
+			r.Post("/todo-lists", s.handleSaveTodoList)
+			r.Put("/todo-lists/{id}", s.handleSaveTodoList)
+			r.Delete("/todo-lists/{id}", s.handleDeleteTodoList)
+			r.Get("/planning/summary", s.handlePlanningSummary)
 			r.Get("/updates", s.handleListUpdates)
 			r.Post("/updates/check", s.handleCheckUpdates)
 			r.Put("/updates/github-token", s.handlePutGitHubToken)

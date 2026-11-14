@@ -92,7 +92,10 @@ export function SettingsPage() {
           <Row label="New-device alerts" hint="Pushover when a scan finds an unknown device">
             <Toggle checked={s.new_device_alerts} onChange={(v) => patch.mutate({ new_device_alerts: v })} />
           </Row>
-          <Row label="Pause all alerts" hint="Silences Pushover notifications">
+          <Row label="Todo reminder time" hint="When due-date reminders for todos are sent">
+            <input type="time" className="input w-auto" value={s.todo_remind_time} onChange={(e) => e.target.value && patch.mutate({ todo_remind_time: e.target.value })} />
+          </Row>
+          <Row label="Pause all alerts" hint="Silences Pushover notifications (reminders wait until you resume)">
             <Toggle checked={s.alerts_paused} onChange={(v) => patch.mutate({ alerts_paused: v })} />
           </Row>
         </Card>

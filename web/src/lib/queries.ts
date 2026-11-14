@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { api } from "./api";
-import type { Bucket, RouterSettings, RouterSnapshot, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User, VulnFinding, VulnScanState, VulnStatus, VulnStatusKind, VulnHistoryPoint, UpdatesResponse, UpdateSource } from "./types";
+import type { Bucket, RouterSettings, RouterSnapshot, NPMSettings, NPMStatus, ProxmoxSettings, ProxmoxSnapshot, StoredBackup, Folder, Note, NoteHit, NoteSummary, NoteVersion, Device, DeviceEvent, ScanRun, ScanStatus, ScanTarget, Host, Hosting, IPCell, IPCheck, IPDetail, Incident, Subnet, Launchpad, Maintenance, Monitor, PushoverSettings, Section, Service, Settings, SpotlightUsage, User, VulnFinding, VulnScanState, VulnStatus, VulnStatusKind, VulnHistoryPoint, UpdatesResponse, UpdateSource, Reminder, ReminderKind, RepeatUnit, Todo, TodoList, PlanningSummary } from "./types";
 
 export const keys = {
   me: ["me"] as const,
@@ -18,6 +18,9 @@ export const keys = {
   devices: ["devices"] as const,
   vulns: ["vulns"] as const,
   updates: ["updates"] as const,
+  reminders: ["reminders"] as const,
+  todos: ["todos"] as const,
+  planning: ["planning-summary"] as const,
   vulnStatus: ["vuln-status"] as const,
   scans: ["scans"] as const,
   scanTargets: ["scan-targets"] as const,
@@ -148,6 +151,11 @@ export function useLiveEvents(enabled: boolean) {
             if (!(msg.data as VulnScanState).running) qc.invalidateQueries({ queryKey: keys.vulnStatus });
           }
           if (msg.type === "updates") qc.invalidateQueries({ queryKey: keys.updates });
+          if (msg.type === "planning") {
+            qc.invalidateQueries({ queryKey: keys.reminders });
+            qc.invalidateQueries({ queryKey: keys.todos });
+            qc.invalidateQueries({ queryKey: keys.planning });
+          }
           if (msg.type === "vulns") {
             qc.invalidateQueries({ queryKey: keys.vulns });
             qc.invalidateQueries({ queryKey: keys.vulnStatus });
@@ -431,6 +439,94 @@ export function useVulnSync() {
     onSuccess: () => setTimeout(() => qc.invalidateQueries({ queryKey: keys.vulnStatus }), 500),
   });
 }
+
+// ── Reminders & todos ─────────────────────────────────────────────────────
+
+export const useReminders = () => useQuery({ queryKey: keys.reminders, queryFn: () => api.get<Reminder[]>("/api/reminders"), refetchInterval: 60_000 });
+export const usePlanningSummary = () => useQuery({ queryKey: keys.planning, queryFn: () => api.get<PlanningSummary>("/api/planning/summary"), refetchInterval: 60_000 });
+
+function usePlanningMutation<V>(fn: (v: V) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.reminders });
+      qc.invalidateQueries({ queryKey: keys.todos });
+      qc.invalidateQueries({ queryKey: keys.planning });
+    },
+  });
+}
+
+export type ReminderInput = { id?: number; title: string; notes: string; kind: ReminderKind; everyN: number; unit: RepeatUnit; anchorAt: string; enabled?: boolean };
+export const useSaveReminder = () =>
+  usePlanningMutation(({ id, ...body }: ReminderInput) => (id ? api.put(`/api/reminders/${id}`, body) : api.post<{ id: number }>("/api/reminders", body)));
+export const useDeleteReminder = () => usePlanningMutation((id: number) => api.del(`/api/reminders/${id}`));
+export const useReminderAction = () =>
+  usePlanningMutation(({ id, action, until }: { id: number; action: "done" | "skip" | "snooze" | "test"; until?: string }) =>
+    api.post(`/api/reminders/${id}/${action}`, until ? { until } : {}),
+  );
+
+export const useTodos = () => useQuery({ queryKey: keys.todos, queryFn: () => api.get<{ todos: Todo[]; lists: TodoList[] }>("/api/todos") });
+
+export type TodoPatch = Partial<Pick<Todo, "kind" | "title" | "notes" | "priority" | "status" | "remind" | "position">> & {
+  listId?: number;
+  clearList?: boolean;
+  parentId?: number;
+  clearParent?: boolean;
+  dueDate?: string;
+  clearDue?: boolean;
+  serviceId?: number;
+  clearService?: boolean;
+  hostId?: number;
+  clearHost?: boolean;
+};
+
+export function useCreateTodo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TodoPatch & { title: string }) => api.post<{ id: number }>("/api/todos", body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: keys.todos });
+      qc.invalidateQueries({ queryKey: keys.planning });
+    },
+  });
+}
+
+/** Optimistic: the list updates immediately, the server catches up. */
+export function useUpdateTodo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: TodoPatch & { id: number }) => api.patch(`/api/todos/${id}`, body),
+    onMutate: async ({ id, ...body }) => {
+      await qc.cancelQueries({ queryKey: keys.todos });
+      const prev = qc.getQueryData<{ todos: Todo[]; lists: TodoList[] }>(keys.todos);
+      if (prev) {
+        const simple: Partial<Todo> = {};
+        for (const k of ["kind", "title", "notes", "priority", "status", "remind", "position"] as const) if (body[k] !== undefined) (simple as Record<string, unknown>)[k] = body[k];
+        if (body.dueDate !== undefined) simple.dueDate = body.dueDate;
+        if (body.clearDue) simple.dueDate = null;
+        if (body.listId !== undefined) simple.listId = body.listId;
+        if (body.clearList) simple.listId = null;
+        qc.setQueryData(keys.todos, { ...prev, todos: prev.todos.map((t) => (t.id === id ? { ...t, ...simple } : t)) });
+      }
+      return { prev };
+    },
+    onError: (_e, _v, ctx) => ctx?.prev && qc.setQueryData(keys.todos, ctx.prev),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: keys.todos });
+      qc.invalidateQueries({ queryKey: keys.planning });
+    },
+  });
+}
+
+export const useDeleteTodo = () => usePlanningMutation((id: number) => api.del(`/api/todos/${id}`));
+export const useReorderTodos = () => usePlanningMutation((ids: number[]) => api.post("/api/todos/reorder", { ids }));
+export const useAddChecklist = () => usePlanningMutation(({ todoId, text }: { todoId: number; text: string }) => api.post(`/api/todos/${todoId}/checklist`, { text }));
+export const useUpdateChecklist = () => usePlanningMutation(({ id, ...body }: { id: number; text?: string; done?: boolean }) => api.patch(`/api/checklist/${id}`, body));
+export const useDeleteChecklist = () => usePlanningMutation((id: number) => api.del(`/api/checklist/${id}`));
+export const useSaveTodoList = () =>
+  usePlanningMutation(({ id, name }: { id?: number; name: string }) => (id ? api.put(`/api/todo-lists/${id}`, { name }) : api.post<{ id: number }>("/api/todo-lists", { name })));
+export const useDeleteTodoList = () => usePlanningMutation((id: number) => api.del(`/api/todo-lists/${id}`));
 
 // ── Updates ───────────────────────────────────────────────────────────────
 

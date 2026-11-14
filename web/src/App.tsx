@@ -18,6 +18,8 @@ import { VulnerabilitiesPage } from "@/pages/admin/network/VulnerabilitiesPage";
 // The docs editor (CodeMirror + markdown) is loaded on demand.
 const DocsPage = lazy(() => import("@/pages/admin/docs/DocsPage").then((m) => ({ default: m.DocsPage })));
 const UpdatesPage = lazy(() => import("@/pages/admin/updates/UpdatesPage").then((m) => ({ default: m.UpdatesPage })));
+const TodosPage = lazy(() => import("@/pages/admin/planning/TodosPage").then((m) => ({ default: m.TodosPage })));
+const RemindersPage = lazy(() => import("@/pages/admin/planning/RemindersPage").then((m) => ({ default: m.RemindersPage })));
 const TopologyPage = lazy(() => import("@/pages/admin/TopologyPage").then((m) => ({ default: m.TopologyPage })));
 const Lazy = ({ children }: { children: ReactNode }) => <Suspense fallback={<div className="p-8 text-sm text-muted">Loading…</div>}>{children}</Suspense>;
 
@@ -56,6 +58,8 @@ const router = createBrowserRouter([
           { path: "/docs/:id", element: <Lazy><DocsPage /></Lazy> },
           { path: "/topology", element: <Lazy><TopologyPage /></Lazy> },
           { path: "/updates", element: <Lazy><UpdatesPage /></Lazy> },
+          { path: "/todos", element: <Lazy><TodosPage /></Lazy> },
+          { path: "/reminders", element: <Lazy><RemindersPage /></Lazy> },
           { path: "/settings", element: <SettingsPage /> },
           {
             path: "*",
