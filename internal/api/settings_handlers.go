@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -37,6 +38,7 @@ var settingSpecs = map[string]settingSpec{
 	"open_new_tab":          {true, isBool},
 	"vuln_enabled":          {true, isBool},
 	"updates_digest":        {true, isBool},
+	"todo_remind_time":      {"09:00", isClock},
 	"vuln_alert_min":        {"high", oneOf("critical", "high", "medium", "low", "off")},
 }
 
@@ -224,4 +226,14 @@ func oneOf(opts ...string) func(any) error {
 		}
 		return fmt.Errorf("must be one of %v", opts)
 	}
+}
+
+var clockRe = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
+
+func isClock(v any) error {
+	s, _ := v.(string)
+	if !clockRe.MatchString(s) {
+		return fmt.Errorf("use a 24-hour time like 09:00")
+	}
+	return nil
 }

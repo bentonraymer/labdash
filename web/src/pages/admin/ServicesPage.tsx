@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Download, ExternalLink, Plus, Trash2 } from "lucide-react";
 import { useDeleteService, useLaunchpad, useNPMStatus, useSaveService } from "@/lib/queries";
 import { ago, fmtDateTime } from "@/lib/time";
+import { TodoBadge } from "@/components/TodoBadge";
 import { NPMBadge, PveStats, useServiceGuest } from "@/components/IntegrationBits";
 import { runtimeLabel, runtimeTone } from "@/lib/labels";
 import type { Runtime, Service } from "@/lib/types";
@@ -213,6 +214,7 @@ export function ServicesPage() {
                   <div className="flex items-center gap-2.5">
                     <ServiceIcon icon={s.icon} name={s.name} className="size-5" />
                     <span className="font-medium whitespace-nowrap">{s.name}</span>
+                    <TodoBadge service={s.id} />
                   </div>
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap text-muted">{s.parentId ? (parentName.get(s.parentId) ?? "—") : <span className="text-faint">—</span>}</td>

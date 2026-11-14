@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/bentonraymer/labdash/internal/integrations"
 	"github.com/bentonraymer/labdash/internal/monitor"
 	"github.com/bentonraymer/labdash/internal/npm"
+	"github.com/bentonraymer/labdash/internal/planning"
 	"github.com/bentonraymer/labdash/internal/proxmox"
 	"github.com/bentonraymer/labdash/internal/pushover"
 	"github.com/bentonraymer/labdash/internal/scanner"
@@ -179,6 +181,27 @@ func run() error {
 		dispatcher.SendDirect(ctx, m)
 	}
 	go srv.Updates.Run(ctx)
+
+	// Reminders and todo due-date reminders (Pushover, re-sent daily until done).
+	plan := planning.New(database, hub)
+	plan.Send = func(ctx context.Context, m planning.Message) bool {
+		if settingOn(ctx, database, "alerts_paused", false) {
+			return false
+		}
+		body := m.Body
+		if strings.TrimSpace(body) == "" {
+			body = "Due now. Mark it done in LabDash to stop the daily reminders."
+		}
+		msg := pushover.Message{Title: m.Title, Body: body}
+		if base := pushAlerts.BaseURL(ctx); base != "" {
+			msg.URL, msg.URLTitle = base+m.Path, m.LinkTitle
+		}
+		dispatcher.SendDirect(ctx, msg)
+		return true
+	}
+	plan.TodoTime = func(ctx context.Context) string { return settingString(ctx, database, "todo_remind_time", "09:00") }
+	srv.Planning = plan
+	go plan.Run(ctx)
 
 	// Background housekeeping.
 	go func() {

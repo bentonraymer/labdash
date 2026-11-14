@@ -2,9 +2,9 @@ import type { ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Activity, ArrowUpCircle, Cpu, FileText, LayoutGrid, LogOut, Network, Search, Server, Settings, Share2, ShieldAlert, Table, type LucideIcon } from "lucide-react";
+import { Activity, AlarmClock, ArrowUpCircle, ListTodo, Cpu, FileText, LayoutGrid, LogOut, Network, Search, Server, Settings, Share2, ShieldAlert, Table, type LucideIcon } from "lucide-react";
 import { api } from "@/lib/api";
-import { useLaunchpad, useMe } from "@/lib/queries";
+import { useLaunchpad, useMe, usePlanningSummary } from "@/lib/queries";
 import { ModeToggle } from "@/components/ModeToggle";
 import { useUI } from "@/components/UIProvider";
 
@@ -19,6 +19,8 @@ const nav: { to: string; label: string; icon: LucideIcon; group?: string }[] = [
   { to: "/network/ips", label: "IP Addresses", icon: Server, group: "Network" },
   { to: "/network/vulns", label: "Vulnerabilities", icon: ShieldAlert, group: "Network" },
   { to: "/docs", label: "Docs", icon: FileText, group: "Knowledge" },
+  { to: "/todos", label: "Todos", icon: ListTodo, group: "Planning" },
+  { to: "/reminders", label: "Reminders", icon: AlarmClock, group: "Planning" },
   { to: "/settings", label: "Settings", icon: Settings, group: "System" },
 ];
 
@@ -27,6 +29,12 @@ export function AdminLayout() {
   const ui = useUI();
   const { data: me } = useMe();
   const { data } = useLaunchpad();
+  const { data: plan } = usePlanningSummary();
+  // Small counts beside nav items that need attention.
+  const badge: Record<string, { n: number; title: string } | undefined> = {
+    "/todos": plan && plan.todosOverdue + plan.todosDueToday > 0 ? { n: plan.todosOverdue + plan.todosDueToday, title: `${plan.todosOverdue} overdue, ${plan.todosDueToday} due today` } : undefined,
+    "/reminders": plan && plan.remindersDue > 0 ? { n: plan.remindersDue, title: `${plan.remindersDue} due` } : undefined,
+  };
   const qc = useQueryClient();
   const navigate = useNavigate();
 
@@ -65,7 +73,12 @@ export function AdminLayout() {
                   }
                 >
                   <n.icon size={15} />
-                  {n.label}
+                  <span className="flex-1">{n.label}</span>
+                  {badge[n.to] && (
+                    <span className="rounded-full bg-warn/20 px-1.5 text-[10px] font-semibold text-warn tabular-nums" title={badge[n.to]!.title}>
+                      {badge[n.to]!.n}
+                    </span>
+                  )}
                 </NavLink>
               </div>
             );

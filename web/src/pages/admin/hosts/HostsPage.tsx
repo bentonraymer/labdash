@@ -9,6 +9,7 @@ import { ServiceIcon } from "@/components/ServiceIcon";
 import { StatusDot } from "@/components/StatusDot";
 import { useUI } from "@/components/UIProvider";
 import { PageHeader } from "../AdminLayout";
+import { TodoBadge } from "@/components/TodoBadge";
 import { HostEditor } from "./HostEditor";
 import { PveStats, hostResource, usePve } from "@/components/IntegrationBits";
 import { WakeButton, useHostLinks } from "@/components/HostActions";
@@ -69,6 +70,7 @@ export function HostsPage() {
         >
           <Icon size={15} className={depth === 0 ? "text-accent" : "text-muted"} />
           <span className="font-medium">{h.name}</span>
+          <TodoBadge host={h.id} />
           <span className="rounded bg-white/5 px-1.5 py-px text-[10px] text-muted uppercase">{hostKindLabel[h.kind]}</span>
           {h.vmid != null && <span className="font-mono text-[11px] text-faint">#{h.vmid}</span>}
           {h.ip && (

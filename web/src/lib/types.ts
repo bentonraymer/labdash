@@ -25,6 +25,7 @@ export interface Settings {
   open_new_tab: boolean;
   vuln_enabled: boolean;
   updates_digest: boolean;
+  todo_remind_time: string;
   vuln_alert_min: "critical" | "high" | "medium" | "low" | "off";
 }
 
@@ -630,4 +631,76 @@ export interface VulnHistoryPoint {
   kev: number;
   /** Rebuilt from finding dates (no snapshot existed yet). */
   estimated: boolean;
+}
+
+// ── Reminders & todos ─────────────────────────────────────────────────────
+
+export type ReminderKind = "once" | "calendar" | "after_done";
+export type RepeatUnit = "day" | "week" | "month" | "quarter" | "year";
+
+export interface Reminder {
+  id: number;
+  title: string;
+  notes: string;
+  kind: ReminderKind;
+  everyN: number;
+  unit: RepeatUnit;
+  anchorAt: string;
+  dueAt: string;
+  enabled: boolean;
+  snoozedUntil: string | null;
+  lastSentAt: string | null;
+  lastDoneAt: string | null;
+  schedule: string;
+  state: "due" | "snoozed" | "upcoming" | "done" | "paused";
+  events: { ts: string; kind: "done" | "skipped"; dueAt: string }[];
+}
+
+export interface ChecklistItem {
+  id: number;
+  text: string;
+  done: boolean;
+  position: number;
+}
+
+export type TodoStatus = "open" | "doing" | "done";
+
+export interface Todo {
+  id: number;
+  listId: number | null;
+  parentId: number | null;
+  kind: "task" | "goal";
+  title: string;
+  notes: string;
+  priority: 1 | 2 | 3 | 4;
+  status: TodoStatus;
+  dueDate: string | null;
+  remind: boolean;
+  position: number;
+  serviceId: number | null;
+  serviceName: string;
+  serviceIcon: string;
+  hostId: number | null;
+  hostName: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  checklist: ChecklistItem[];
+  tasksTotal: number;
+  tasksDone: number;
+}
+
+export interface TodoList {
+  id: number;
+  name: string;
+  position: number;
+  open: number;
+}
+
+export interface PlanningSummary {
+  remindersDue: number;
+  todosOverdue: number;
+  todosDueToday: number;
+  openByService: Record<string, number>;
+  openByHost: Record<string, number>;
 }
